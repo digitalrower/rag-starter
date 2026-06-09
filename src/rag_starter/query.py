@@ -3,13 +3,15 @@ import sys
 from typing import TypedDict, cast
 
 import chromadb
-from anthropic import Anthropic, APIError
+from anthropic import APIError
 from anthropic.types import TextBlock
 from chromadb import Collection
-from dotenv import load_dotenv
 from langfuse import get_client, propagate_attributes
 
-load_dotenv()
+from rag_starter.client import get_anthropic_client
+
+# from dotenv import load_dotenv
+# load_dotenv()
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -74,7 +76,8 @@ def generate_answer(prompt: str) -> str:
         model=model_name,
         input={"messages": [{"role": "user", "content": prompt}]},
     ) as gen:
-        client = Anthropic()
+
+        client = get_anthropic_client()
 
         # COST NOTE: Anthropic prompt caching (cache_control breakpoints) will be
         # applied to this system prompt + retrieved context at W13 once we have
@@ -130,7 +133,7 @@ def main(
     with langfuse.start_as_current_observation(
         as_type="span", name="main_rag_query", input={"user_question": user_question}
     ) as span:
-        # langfuse: cpature the trace id
+        # langfuse: capture the trace id
         trace_id = langfuse.get_current_trace_id()
         assert trace_id is not None, "trace_id should never be None inside an active span"
 

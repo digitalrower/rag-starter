@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import cast
 
 from dotenv import load_dotenv
+
+load_dotenv() # must run before any import that triggers langfuse initialization
+
 from langfuse import get_client, propagate_attributes
 
 from evals.scorer import score_answer_relevance, score_faithfulness, score_precision
 from rag_starter import query
-
-load_dotenv()
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -37,8 +38,8 @@ def load_dataset(path: Path) -> list[dict[str, str]]:
 def run_eval(dataset: list[dict[str, str]], collection: query.Collection) -> list[dict]:
     run_id = f"eval-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     results = []
-    #for item in dataset[26:27]:    # use for test to save on tokens; $ python -m evals.runner
-    for item in dataset:
+    for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
+    #for item in dataset:
         with (
             propagate_attributes(session_id=run_id, tags=["eval", item["category"]]),
             langfuse.start_as_current_observation(

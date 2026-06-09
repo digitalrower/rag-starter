@@ -3,12 +3,10 @@ import logging
 import sys
 from typing import cast
 
-from anthropic import Anthropic
 from anthropic.types import TextBlock
-from dotenv import load_dotenv
 from langfuse import get_client
 
-load_dotenv()
+from rag_starter.client import get_anthropic_client
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -29,7 +27,7 @@ def score_precision(
         },
     ) as span:
         context = "\n\n".join(retrieved_chunks)
-        client = Anthropic()
+        client = get_anthropic_client()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
@@ -84,7 +82,7 @@ def score_faithfulness(
         },
     ) as span:
         context = "\n\n".join(retrieved_chunks)
-        client = Anthropic()
+        client = get_anthropic_client()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
@@ -130,7 +128,7 @@ def score_answer_relevance(
             "expected_answer": expected_answer,
         },
     ) as span:
-        client = Anthropic()
+        client = get_anthropic_client()
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
