@@ -39,7 +39,7 @@ def load_dataset(path: Path) -> list[EvalItem]:
 def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[EvalResult]:
     run_id = f"eval-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     results = []
-    # for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
+    #for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
     for item in dataset:
         with (
             propagate_attributes(session_id=run_id, tags=["eval", item.category]),
@@ -170,13 +170,15 @@ def print_summary(results: list[EvalResult]) -> None:
         print(f"{cat:<20}{faith_display:<20}{relev_display:<20}{prec_display:<15}{count}")
 
     print("-" * 75)
-    faith_overall = sum(all_faith) / len(all_faith)
-    relev_overall = sum(all_relev) / len(all_relev)
-    prec_overall = sum(all_prec) / len(all_prec)
+    faith_overall = sum(all_faith) / len(all_faith) if all_faith else None
+    relev_overall = sum(all_relev) / len(all_relev) if all_relev else None
+    prec_overall = sum(all_prec) / len(all_prec) if all_prec else None
     count_overall = len(all_faith)
+    faith_o_display = f"{faith_overall:.2f}" if faith_overall is not None else "N/A"
+    relev_o_display = f"{relev_overall:.2f}" if relev_overall is not None else "N/A"
+    prec_o_display = f"{prec_overall:.2f}" if prec_overall is not None else "N/A"
     print(
-        f"{'OVERALL':<20}{faith_overall:<20.2f}"
-        f"{relev_overall:<20.2f}{prec_overall:<15.2f}{count_overall}"
+        f"{'OVERALL':<20}{faith_o_display:<20}{relev_o_display:<20}{prec_o_display:<15}{count_overall}"
     )
     print(f"\nErrored items: {len(errored)} / {len(results)}")
 
@@ -201,15 +203,15 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
         all_relev.extend(relev_scores)
         all_prec.extend(prec_scores)
         summary[cat] = {
-            "faithfulness": round(sum(faith_scores) / len(faith_scores), 2),
-            "relevance": round(sum(relev_scores) / len(relev_scores), 2),
-            "precision": round(sum(prec_scores) / len(prec_scores), 2),
+            "faithfulness": round(sum(faith_scores) / len(faith_scores), 2) if faith_scores else None,
+            "relevance": round(sum(relev_scores) / len(relev_scores), 2) if relev_scores else None,
+            "precision": round(sum(prec_scores) / len(prec_scores), 2) if prec_scores else None,
             "count": len(cat_results),
         }
     summary["overall"] = {
-        "faithfulness": round(sum(all_faith) / len(all_faith), 2),
-        "relevance": round(sum(all_relev) / len(all_relev), 2),
-        "precision": round(sum(all_prec) / len(all_prec), 2),
+        "faithfulness": round(sum(all_faith) / len(all_faith), 2) if all_faith else None,
+        "relevance": round(sum(all_relev) / len(all_relev), 2) if all_relev else None,
+        "precision": round(sum(all_prec) / len(all_prec), 2) if all_prec else None,
         "count": len(all_faith),
         "errored": len(errored),
     }
