@@ -1,12 +1,11 @@
-import json
 import logging
 import sys
-from typing import cast
 
 from anthropic.types import TextBlock
 from langfuse import get_client
 
 from rag_starter.client import get_anthropic_client
+from rag_starter.models import ScoreResult
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def score_precision(
     question: str, retrieved_chunks: list[str], expected_answer: str
-) -> dict[str, int | str]:
+) -> ScoreResult:
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_precision",
@@ -59,18 +58,17 @@ def score_precision(
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        parsed_result = cast(dict[str, int | str], json.loads(raw))
-        span.update(output=parsed_result)
-        logger.info(f"Scoring complete: scorer_precision score={parsed_result['score']}")
+        parsed_result = ScoreResult.model_validate_json(raw)
+        span.update(output=parsed_result.model_dump())
+        logger.info(f"Scoring complete: scorer_precision score={parsed_result.score}")
         return parsed_result
-
 
 def score_faithfulness(
     question: str,
     retrieved_chunks: list[str],
     generated_answer: str,
     expected_answer: str,
-) -> dict[str, int | str]:
+) -> ScoreResult:
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_faithfulness",
@@ -110,15 +108,14 @@ def score_faithfulness(
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        parsed_result = cast(dict[str, int | str], json.loads(raw))
-        span.update(output=parsed_result)
-        logger.info(f"Scoring complete: scorer_faithfulness score={parsed_result['score']}")
+        parsed_result = ScoreResult.model_validate_json(raw)
+        span.update(output=parsed_result.model_dump())
+        logger.info(f"Scoring complete: scorer_faithfulness score={parsed_result.score}")
         return parsed_result
-
 
 def score_answer_relevance(
     question: str, generated_answer: str, expected_answer: str
-) -> dict[str, int | str]:
+) -> ScoreResult: 
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_relevance",
@@ -160,9 +157,9 @@ def score_answer_relevance(
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        parsed_result = cast(dict[str, int | str], json.loads(raw))
-        span.update(output=parsed_result)
-        logger.info(f"Scoring complete: scorer_relevance score={parsed_result['score']}")
+        parsed_result = ScoreResult.model_validate_json(raw)
+        span.update(output=parsed_result.model_dump())
+        logger.info(f"Scoring complete: scorer_relevance score={parsed_result.score}")
         return parsed_result
 
 
@@ -203,6 +200,6 @@ if __name__ == "__main__":
                 case["answer"],
                 case["expected"],
             )
-            print(f"[{case['label']}] score={result['score']} | {result['reasoning']}")
+            print(f"[{case['label']}] score={result.score} | {result.reasoning}")
 
     langfuse.flush()
