@@ -6,13 +6,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv() # must run before any import that triggers langfuse initialization
+load_dotenv()  # must run before any import that triggers langfuse initialization
 
 from langfuse import get_client, propagate_attributes
 from pydantic import TypeAdapter
 
 from evals.scorer import score_answer_relevance, score_faithfulness, score_precision
 from rag_starter import query
+from rag_starter.errors import RAGError
 from rag_starter.models import EvalItem, EvalResult
 
 # langfuse: initialize langfuse client
@@ -34,10 +35,11 @@ def load_dataset(path: Path) -> list[EvalItem]:
     adapter = TypeAdapter(list[EvalItem])
     return adapter.validate_json(path.read_bytes())
 
+
 def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[EvalResult]:
     run_id = f"eval-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     results = []
-    #for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
+    # for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
     for item in dataset:
         with (
             propagate_attributes(session_id=run_id, tags=["eval", item.category]),
@@ -51,68 +53,81 @@ def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[Eval
                 },
             ) as item_span,
         ):
-            generated_result = query.main(collection, item.question)
-            chunks_text = [c.text for c in generated_result.chunks]
+            try:
+                generated_result = query.main(collection, item.question)
+                chunks_text = [c.text for c in generated_result.chunks]
 
-            faithfulness = score_faithfulness(
-                item.question,
-                chunks_text,
-                generated_result.answer,
-                item.expected_answer,
-            )
-            relevance = score_answer_relevance(
-                item.question, generated_result.answer, item.expected_answer
-            )
-            precision = score_precision(item.question, chunks_text, item.expected_answer)
-
-            # langfuse: emit one score object per metric, attached to this item's trace
-            trace_id = generated_result.trace_id
-            langfuse.create_score(
-                trace_id=trace_id,
-                name="faithfulness",
-                value=int(faithfulness.score),
-                data_type="NUMERIC",
-                comment=str(faithfulness.reasoning),
-            )
-            langfuse.create_score(
-                trace_id=trace_id,
-                name="relevance",
-                value=int(relevance.score),
-                data_type="NUMERIC",
-                comment=str(relevance.reasoning),
-            )
-            langfuse.create_score(
-                trace_id=trace_id,
-                name="precision",
-                value=int(precision.score),
-                data_type="NUMERIC",
-                comment=str(precision.reasoning),
-            )
-
-            item_span.update(
-                output={
-                    "faithfulness": int(faithfulness.score),
-                    "relevance": int(relevance.score),
-                    "precision": int(precision.score),
-                }
-            )
-
-            results.append(
-                EvalResult(
-                    id=item.id,
-                    category=item.category,
-                    question=item.question,
-                    expected_answer=item.expected_answer,
-                    actual_answer=generated_result.answer,
-                    faithfulness_score=faithfulness.score,
-                    faithfulness_reasoning=faithfulness.reasoning,
-                    relevance_score=relevance.score,
-                    relevance_reasoning=relevance.reasoning,
-                    precision_score=precision.score,
-                    precision_reasoning=precision.reasoning,
-                    sources=generated_result.sources,
+                faithfulness = score_faithfulness(
+                    item.question,
+                    chunks_text,
+                    generated_result.answer,
+                    item.expected_answer,
                 )
-            )
+                relevance = score_answer_relevance(
+                    item.question, generated_result.answer, item.expected_answer
+                )
+                precision = score_precision(item.question, chunks_text, item.expected_answer)
+
+                # langfuse: emit one score object per metric, attached to this item's trace
+                trace_id = generated_result.trace_id
+                langfuse.create_score(
+                    trace_id=trace_id,
+                    name="faithfulness",
+                    value=int(faithfulness.score),
+                    data_type="NUMERIC",
+                    comment=str(faithfulness.reasoning),
+                )
+                langfuse.create_score(
+                    trace_id=trace_id,
+                    name="relevance",
+                    value=int(relevance.score),
+                    data_type="NUMERIC",
+                    comment=str(relevance.reasoning),
+                )
+                langfuse.create_score(
+                    trace_id=trace_id,
+                    name="precision",
+                    value=int(precision.score),
+                    data_type="NUMERIC",
+                    comment=str(precision.reasoning),
+                )
+
+                item_span.update(
+                    output={
+                        "faithfulness": int(faithfulness.score),
+                        "relevance": int(relevance.score),
+                        "precision": int(precision.score),
+                    }
+                )
+
+                results.append(
+                    EvalResult(
+                        id=item.id,
+                        category=item.category,
+                        question=item.question,
+                        expected_answer=item.expected_answer,
+                        actual_answer=generated_result.answer,
+                        faithfulness_score=faithfulness.score,
+                        faithfulness_reasoning=faithfulness.reasoning,
+                        relevance_score=relevance.score,
+                        relevance_reasoning=relevance.reasoning,
+                        precision_score=precision.score,
+                        precision_reasoning=precision.reasoning,
+                        sources=generated_result.sources,
+                    )
+                )
+            except RAGError as e:
+                logger.error(f"Eval item {item.id} failed: {e}")
+                item_span.update(level="ERROR", status_message=str(e))
+                results.append(
+                    EvalResult(
+                        id=item.id,
+                        category=item.category,
+                        question=item.question,
+                        expected_answer=item.expected_answer,
+                        error=str(e),
+                    )
+                )
 
     return results
 
@@ -131,13 +146,16 @@ def print_summary(results: list[EvalResult]) -> None:
     all_faith: list[float] = []
     all_relev: list[float] = []
     all_prec: list[float] = []
+    errored = [r for r in results if r.error is not None]
 
     for cat in categories:
         cat_results = [r for r in results if r.category == cat]
         count = len(cat_results)
         if count == 0:
             continue
-        faith_scores = [r.faithfulness_score for r in cat_results if r.faithfulness_score is not None]
+        faith_scores = [
+            r.faithfulness_score for r in cat_results if r.faithfulness_score is not None
+        ]
         relev_scores = [r.relevance_score for r in cat_results if r.relevance_score is not None]
         prec_scores = [r.precision_score for r in cat_results if r.precision_score is not None]
         faith_avg = sum(faith_scores) / len(faith_scores) if faith_scores else None
@@ -151,7 +169,6 @@ def print_summary(results: list[EvalResult]) -> None:
         prec_display = f"{prec_avg:.2f}" if prec_avg is not None else "N/A"
         print(f"{cat:<20}{faith_display:<20}{relev_display:<20}{prec_display:<15}{count}")
 
-
     print("-" * 75)
     faith_overall = sum(all_faith) / len(all_faith)
     relev_overall = sum(all_relev) / len(all_relev)
@@ -161,6 +178,7 @@ def print_summary(results: list[EvalResult]) -> None:
         f"{'OVERALL':<20}{faith_overall:<20.2f}"
         f"{relev_overall:<20.2f}{prec_overall:<15.2f}{count_overall}"
     )
+    print(f"\nErrored items: {len(errored)} / {len(results)}")
 
 
 def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
@@ -169,11 +187,14 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
     categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
     summary: dict[str, object] = {}
     all_faith, all_relev, all_prec = [], [], []
+    errored = [r for r in results if r.error is not None]
     for cat in categories:
         cat_results = [r for r in results if r.category == cat]
         if not cat_results:
             continue
-        faith_scores = [r.faithfulness_score for r in cat_results if r.faithfulness_score is not None]
+        faith_scores = [
+            r.faithfulness_score for r in cat_results if r.faithfulness_score is not None
+        ]
         relev_scores = [r.relevance_score for r in cat_results if r.relevance_score is not None]
         prec_scores = [r.precision_score for r in cat_results if r.precision_score is not None]
         all_faith.extend(faith_scores)
@@ -190,6 +211,7 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
         "relevance": round(sum(all_relev) / len(all_relev), 2),
         "precision": round(sum(all_prec) / len(all_prec), 2),
         "count": len(all_faith),
+        "errored": len(errored),
     }
     with open(output_path, "w") as f:
         json.dump(summary, f, indent=2)

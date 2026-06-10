@@ -9,6 +9,7 @@ from chromadb import Collection
 from langfuse import get_client, propagate_attributes
 
 from rag_starter.client import get_anthropic_client
+from rag_starter.errors import GenerationError
 from rag_starter.models import Chunk, QueryResponse
 
 # from dotenv import load_dotenv
@@ -19,6 +20,7 @@ langfuse = get_client()
 
 # logging
 logger = logging.getLogger(__name__)
+
 
 def get_collection() -> Collection:
     client = chromadb.PersistentClient(path="./chroma_db")
@@ -69,7 +71,6 @@ def generate_answer(prompt: str) -> str:
         model=model_name,
         input={"messages": [{"role": "user", "content": prompt}]},
     ) as gen:
-
         client = get_anthropic_client()
 
         # COST NOTE: Anthropic prompt caching (cache_control breakpoints) will be
@@ -102,16 +103,9 @@ def generate_answer(prompt: str) -> str:
 
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
-
-            # log: ERROR if the Anthropic API call fails
             logger.error(f"Anthropic API call failed: {error_msg}")
-
             gen.update(level="ERROR", status_message=error_msg)
-            return error_msg
-        except Exception as e:
-            error_msg = f"Unexpected error: {e}"
-            gen.update(level="ERROR", status_message=error_msg)
-            return error_msg
+            raise GenerationError(error_msg) from e
 
 
 def main(
