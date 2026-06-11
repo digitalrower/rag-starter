@@ -17,8 +17,8 @@ class QueryResponse(BaseModel):
 
 class ScoreResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    score: int
     reasoning: str
+    score: int
 
 
 class EvalItem(BaseModel):

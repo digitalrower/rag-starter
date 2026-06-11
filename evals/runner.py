@@ -39,7 +39,7 @@ def load_dataset(path: Path) -> list[EvalItem]:
 def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[EvalResult]:
     run_id = f"eval-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     results = []
-    #for item in dataset[26:27]:    # use for smoke test to save on tokens; $ python -m evals.runner
+    # for item in dataset[26:27]:  # use for smoke test; $ python -m evals.runner
     for item in dataset:
         with (
             propagate_attributes(session_id=run_id, tags=["eval", item.category]),
@@ -203,7 +203,9 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
         all_relev.extend(relev_scores)
         all_prec.extend(prec_scores)
         summary[cat] = {
-            "faithfulness": round(sum(faith_scores) / len(faith_scores), 2) if faith_scores else None,
+            "faithfulness": round(sum(faith_scores) / len(faith_scores), 2)
+            if faith_scores
+            else None,
             "relevance": round(sum(relev_scores) / len(relev_scores), 2) if relev_scores else None,
             "precision": round(sum(prec_scores) / len(prec_scores), 2) if prec_scores else None,
             "count": len(cat_results),

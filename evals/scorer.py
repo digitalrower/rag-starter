@@ -2,9 +2,7 @@ import logging
 import sys
 
 from anthropic import APIError
-from anthropic.types import TextBlock
 from langfuse import get_client
-from pydantic import ValidationError
 
 from rag_starter.client import get_anthropic_client
 from rag_starter.errors import ResponseParseError, ScoringError
@@ -32,32 +30,31 @@ def score_precision(
         client = get_anthropic_client()
 
         try:
-            response = client.messages.create(
+            response = client.messages.parse(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=256,
                 temperature=0,
                 system=(
                     "You are an evaluator. Given the following context, question, "
-                    "and expected answer, "
-                    "score whether at least one of the retrieved chunks contains sufficient "
-                    "information to answer the question. "
-                    "Score 1 if at least one chunk contains information that could answer "
-                    "the question. "
+                    "and expected answer, score whether at least one of the retrieved "
+                    "chunks contains sufficient information to answer the question. "
+                    "Score 1 if at least one chunk contains information that could "
+                    "answer the question. "
                     "Score 0 if none of the chunks contain relevant information. "
-                    "Sufficient information means the chunks don't need the exact answer "
-                    "word-for-word, just enough that a reasonable answer could be "
-                    "generated from them. "
-                    'Return JSON only: {"score": int, "reasoning": str}'
+                    "Sufficient information means the chunks don't need the exact "
+                    "answer word-for-word, just enough that a reasonable answer could "
+                    "be generated from them."
                 ),
                 messages=[
                     {
                         "role": "user",
                         "content": (
                             f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                            "Answer: {expected_answer}"
+                            f"Answer: {expected_answer}"
                         ),
                     }
                 ],
+                output_format=ScoreResult,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
@@ -65,21 +62,12 @@ def score_precision(
             span.update(level="ERROR", status_message=error_msg)
             raise ScoringError(error_msg) from e
 
-        block = response.content[0]
-        raw = block.text if isinstance(block, TextBlock) else ""
-
-        try:
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-            parsed_result = ScoreResult.model_validate_json(raw)
-        except ValidationError as e:
-            error_msg = f"Couldn't parse response: {e}"
-            logger.error(f"Parse response failed: {error_msg}")
+        parsed_result = response.parsed_output
+        if parsed_result is None:
+            error_msg = "Judge returned no parseable structured output"
+            logger.error(f"Parse failed: {error_msg}")
             span.update(level="ERROR", status_message=error_msg)
-            raise ResponseParseError(error_msg, raw=raw) from e
+            raise ResponseParseError(error_msg)
 
         span.update(output=parsed_result.model_dump())
         logger.info(f"Scoring complete: scorer_precision score={parsed_result.score}")
@@ -105,7 +93,7 @@ def score_faithfulness(
         context = "\n\n".join(retrieved_chunks)
         client = get_anthropic_client()
         try:
-            response = client.messages.create(
+            response = client.messages.parse(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=256,
                 temperature=0,
@@ -116,17 +104,17 @@ def score_faithfulness(
                     "in the provided context. "
                     "Score 5 if fully grounded, 1 if it contains hallucinated "
                     "facts not in context. "
-                    'Return JSON only: {"score": int, "reasoning": str}'
                 ),
                 messages=[
                     {
                         "role": "user",
                         "content": (
                             f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                            "Answer: {generated_answer}"
+                            f"Answer: {expected_answer}"
                         ),
                     }
                 ],
+                output_format=ScoreResult,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
@@ -134,21 +122,12 @@ def score_faithfulness(
             span.update(level="ERROR", status_message=error_msg)
             raise ScoringError(error_msg) from e
 
-        block = response.content[0]
-        raw = block.text if isinstance(block, TextBlock) else ""
-
-        try:
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-            parsed_result = ScoreResult.model_validate_json(raw)
-        except ValidationError as e:
-            error_msg = f"Couldn't parse response: {e}"
-            logger.error(f"Parse response failed: {error_msg}")
+        parsed_result = response.parsed_output
+        if parsed_result is None:
+            error_msg = "Judge returned no parseable structured output"
+            logger.error(f"Parse failed: {error_msg}")
             span.update(level="ERROR", status_message=error_msg)
-            raise ResponseParseError(error_msg, raw=raw) from e
+            raise ResponseParseError(error_msg)
 
         span.update(output=parsed_result.model_dump())
         logger.info(f"Scoring complete: scorer_faithfulness score={parsed_result.score}")
@@ -170,7 +149,7 @@ def score_answer_relevance(
         client = get_anthropic_client()
 
         try:
-            response = client.messages.create(
+            response = client.messages.parse(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=256,
                 temperature=0,
@@ -181,7 +160,6 @@ def score_answer_relevance(
                     "addresses the question that was asked. "
                     "Score 5 if the answer fully and directly addresses the question, "
                     "1 if the answer is off-topic, evasive, or fails to address what was asked. "
-                    'Return JSON only: {"score": int, "reasoning": str}'
                 ),
                 messages=[
                     {
@@ -193,6 +171,7 @@ def score_answer_relevance(
                         ),
                     }
                 ],
+                output_format=ScoreResult,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
@@ -200,21 +179,12 @@ def score_answer_relevance(
             span.update(level="ERROR", status_message=error_msg)
             raise ScoringError(error_msg) from e
 
-        block = response.content[0]
-        raw = block.text if isinstance(block, TextBlock) else ""
-
-        try:
-            if raw.startswith("```"):
-                raw = raw.split("```")[1]
-                if raw.startswith("json"):
-                    raw = raw[4:]
-                raw = raw.strip()
-            parsed_result = ScoreResult.model_validate_json(raw)
-        except ValidationError as e:
-            error_msg = f"Couldn't parse response: {e}"
-            logger.error(f"Parse response failed: {error_msg}")
+        parsed_result = response.parsed_output
+        if parsed_result is None:
+            error_msg = "Judge returned no parseable structured output"
+            logger.error(f"Parse failed: {error_msg}")
             span.update(level="ERROR", status_message=error_msg)
-            raise ResponseParseError(error_msg, raw=raw) from e
+            raise ResponseParseError(error_msg)
 
         span.update(output=parsed_result.model_dump())
         logger.info(f"Scoring complete: scorer_relevance score={parsed_result.score}")

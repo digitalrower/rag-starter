@@ -17,6 +17,6 @@ class ScoringError(RAGError):
 class ResponseParseError(RAGError):
     """LLM returned text that did not parse into the expected shape."""
 
-    def __init__(self, message: str, *, raw: str) -> None:
+    def __init__(self, message: str, *, raw: str | None = None) -> None:
         super().__init__(message)
         self.raw = raw

@@ -65,7 +65,7 @@ through silently. New models live in `src/rag_starter/models.py` (vanilla Pydant
 
 - `Chunk` (`text`, `source`)
 - `QueryResponse` (`answer`, `sources`, `chunks: list[Chunk]`, `trace_id`)
-- `ScoreResult` (`score`, `reasoning`)
+- `ScoreResult` (`score`, `reasoning`; reordered to `reasoning`, `score` in Pattern 4)
 - `EvalItem` (`id`, `category`, `question`, `expected_answer`, plus `notes` and `pair_id`)
 - `EvalResult` (the per-item result fields, with an optional `error` field and `int | None`
   scores)
@@ -111,26 +111,116 @@ structural and did not alter retrieval or generation behavior.
 
 ## Pattern 2: Typed error hierarchy
 
-**Status:** PENDING (not yet applied). Placeholder; do not treat as complete.
+**Status:** applied, committed. Error path verified by forced failure.
 
 **Source.** `src/anthropic/_exceptions.py`: one root (`AnthropicError(Exception)`), then
 `APIError`, then status and connection branches, with each concrete status subclass pinning a
-status code. The lesson to lift is that an exception is a place to carry structured context
-(status, request id, body), not just a message string.
+status code. Low-level httpx exceptions are caught in `_base_client.py`, wrapped with context,
+and re-raised as typed SDK errors. The lesson lifted: exceptions are categorical and carry
+structured context, and the application chains the SDK's errors (`raise ... from e`) rather
+than copying their fields.
 
-**What it will replace.** Two gaps. In `query.py`, `generate_answer` currently catches the API
-error and returns the error text as the answer, so a failure masquerades as a valid answer to
-every caller. In `scorer.py`, there is no protection around the judge call or its parse, so one
-malformed judge response can end the whole eval pass.
+**What it replaced.** Two gaps. In `query.py`, `generate_answer` caught the API error and
+returned the error text as the answer, so a failure masqueraded as a valid answer to every
+caller, and the eval scorers then graded the error string. In `scorer.py`, there was no
+protection around the judge call or its parse, so one malformed judge response could end the
+whole eval pass.
 
-**Plan.** New `src/rag_starter/errors.py` with a small categorical tree (`RAGError` base plus
-`RetrievalError`, `GenerationError`, `ScoringError`, `ResponseParseError`). `generate_answer`
-raises `GenerationError` instead of returning an error string. The scorers wrap their call and
-parse and raise `ScoringError` carrying the raw text. The eval runner wraps each item so one
-failure records an errored `EvalResult` (using the `error` field and `None` scores from Pattern
-3A) and the loop continues. This is the change that makes the `int | None` score paths live.
+**What was built.** New `src/rag_starter/errors.py` with a small categorical tree: `RAGError`
+base plus `RetrievalError`, `GenerationError`, `ScoringError`, and `ResponseParseError` (the
+one class with a custom field, carrying the raw text that failed to parse). `generate_answer`
+raises `GenerationError` instead of returning an error string; the broad `except Exception`
+was removed deliberately so unanticipated bugs fail loudly during development rather than
+being mislabeled as generation failures. Each scorer wraps the judge call (`ScoringError`) and
+the parse (`ResponseParseError`) in narrow try/excepts, both chained with `from e`. The eval
+runner wraps each item in `except RAGError`, records an errored `EvalResult` (the `error`
+field and `None` scores from Pattern 3A), marks the Langfuse span ERROR, and continues. The
+summaries report the error count as a separate first-class metric and exclude errored items
+from quality averages, with denominators matching the filtered population.
 
-_Fill in source detail, files, and eval numbers once applied._
+**Verification, and what it surfaced.** The error path was tested by forcing one scorer to
+raise on a single item, then running the full eval. The run survived, the item was isolated
+and reported, and the surviving items averaged correctly. The same verification run surfaced
+two real findings. First, a latent divide-by-zero in both summary functions when a category
+had zero scored items, now guarded. Second, and more significant: 13 of 40 items failed with
+`ResponseParseError` because the judge model intermittently returns prose preambles ("I need
+to evaluate whether...") instead of the requested JSON. The old untyped parse had been masking
+this nondeterministic unreliability; the typed boundary made it visible and isolatable. The
+fix (migrating the scorers to structured outputs) is Pattern 4 below.
+
+**Eval note.** No before/after table for this pattern. The verification run is not comparable
+to baseline because the judge-reliability issue contaminates it, and the clean comparison
+belongs to Pattern 4, which changes the judging instrument itself.
+
+**Files.** New: `src/rag_starter/errors.py`. Modified: `query.py`, `scorer.py`, `runner.py`.
+
+---
+
+## Pattern 4: Structured outputs for the judge (reliability fix)
+
+**Status:** applied, committed. Clean full run, 0 errored items.
+
+**Why it exists.** Pattern 2's verification exposed that the LLM judge does not reliably
+follow "Return JSON only": at temperature 0, the same prompts intermittently yield prose
+preambles or markdown-wrapped output, and on one full run 13 of 40 items failed to parse.
+Prompt-level instructions cannot guarantee format. The API-level fix is structured outputs
+(constrained decoding), which makes schema-conforming JSON the only output the model can emit
+and eliminates the failure class rather than narrowing it.
+
+**Source / reference.** Anthropic structured outputs (GA), Claude docs, Build with Claude,
+structured-outputs page. In SDK 0.105.2, verified against the local clone:
+`client.messages.parse(...)` (`resources/messages/messages.py`) accepts
+`output_format=<PydanticModel>`, derives the JSON schema from the model via
+`pydantic.TypeAdapter`, and returns a `ParsedMessage`. The parsed object is read from the
+`ParsedMessage.parsed_output` property (`types/parsed_message.py`), typed
+`Optional[ResponseFormatT]`: it returns the validated model or `None` if no parseable
+structured output is present.
+
+**What was built.** All three scorers migrated from `client.messages.create(...)` plus
+fence-stripping plus `ScoreResult.model_validate_json(...)` to
+`client.messages.parse(..., output_format=ScoreResult)`. The fence-strip blocks and the manual
+parse were deleted, along with the now-unused `ValidationError` and `TextBlock` imports. The
+parse-failure path changed from catching a `ValidationError` to checking
+`response.parsed_output is None` and raising `ResponseParseError` (whose `raw` field was relaxed
+to optional, since the `None` path has no clean raw text to carry). The `APIError` try/except
+around the call was kept unchanged. The redundant "Return JSON only" sentence was dropped from
+each system prompt, since the schema now enforces format at the decode level. `ScoreResult`
+field order was reversed to `reasoning` then `score`, so under in-order constrained decoding the
+judge writes its rationale before committing to a number rather than after.
+
+**New canonical baseline.** This migration changed the measurement instrument, so these numbers
+are not comparable to the old free-text-judge baseline (4.95 / 3.55 / 0.53) and supersede it.
+All future comparisons (Docs Copilot regression gates, the W21 stats harness) measure against
+this baseline.
+
+| Metric | New baseline |
+|---|---|
+| Faithfulness | 3.40 |
+| Relevance | 3.52 |
+| Precision@3 | 0.47 |
+
+n = 40, 0 errored items. The lower faithfulness versus the old baseline is the instrument
+becoming more honest, not a regression: the constrained judge scores decisively (the
+distribution is now bimodal, mostly 1s and 5s) where the old free-text judge produced an
+inflated, muddier average. Spot-checking the low scores confirmed they are defensible: items
+scored 1 are correct refusals ("I don't know based on the provided documentation") or genuinely
+ungrounded answers, not judge errors.
+
+**Known limitation surfaced (logged, not fixed here).** The faithfulness rubric does not handle
+correct refusals explicitly, so the judge scores an "I don't know" answer as faithfulness 1
+(reading it as ungrounded). There is a defensible argument that a correct refusal is perfectly
+faithful (it invents nothing and stays within the context by admitting the context lacks the
+answer) and should score high. Resolving this means a rubric change, which would shift the
+instrument again, so it is deferred rather than folded into this baseline. Tracked as scorer
+prompt-quality work for a later iteration.
+
+**Provider coupling, logged.** `messages.parse` / structured outputs is Anthropic-specific API
+surface. Acceptable per the standing posture (Claude is the default for sellable artifacts; the
+judge stays Claude). Invoice-to-JSON (Project 2) is built on this same technique, so this is a
+head start, not a one-off.
+
+**Files.** Modified: `src/rag_starter/models.py` (field reorder), `src/rag_starter/errors.py`
+(`raw` optional), `evals/scorer.py` (all three scorers).
 
 ---
 
