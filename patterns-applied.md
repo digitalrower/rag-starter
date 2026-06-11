@@ -188,31 +188,34 @@ each system prompt, since the schema now enforces format at the decode level. `S
 field order was reversed to `reasoning` then `score`, so under in-order constrained decoding the
 judge writes its rationale before committing to a number rather than after.
 
-**New canonical baseline.** This migration changed the measurement instrument, so these numbers
-are not comparable to the old free-text-judge baseline (4.95 / 3.55 / 0.53) and supersede it.
-All future comparisons (Docs Copilot regression gates, the W21 stats harness) measure against
-this baseline.
+**New canonical baseline.** The first run after this migration recorded a misleading
+faithfulness number due to a separate scorer bug found immediately afterward (see below); the
+corrected baseline is the one that stands.
 
-| Metric | New baseline |
+| Metric | Baseline |
 |---|---|
-| Faithfulness | 3.40 |
-| Relevance | 3.52 |
-| Precision@3 | 0.47 |
+| Faithfulness | 4.95 |
+| Relevance | 3.45 |
+| Precision@3 | 0.45 |
 
-n = 40, 0 errored items. The lower faithfulness versus the old baseline is the instrument
-becoming more honest, not a regression: the constrained judge scores decisively (the
-distribution is now bimodal, mostly 1s and 5s) where the old free-text judge produced an
-inflated, muddier average. Spot-checking the low scores confirmed they are defensible: items
-scored 1 are correct refusals ("I don't know based on the provided documentation") or genuinely
-ungrounded answers, not judge errors.
+n = 40, 0 errored items. Faithfulness is high and uniform (38 of 40 items score 5, the rest 4),
+matching the standing finding that generation is strong and retrieval is the weak link.
+Precision@3 at 0.45 is that retrieval weakness. These numbers are close to the earlier W5E
+free-text-judge read (4.95 / 3.55 / 0.53), which is the expected outcome: faithfulness is
+identical and the small relevance and precision differences are ordinary run-to-run and
+instrument variation, not a regression. The structured-output migration did not move the quality
+scores; its value is reliability (eliminating the 13-of-40 parse failures), not a score change.
 
-**Known limitation surfaced (logged, not fixed here).** The faithfulness rubric does not handle
-correct refusals explicitly, so the judge scores an "I don't know" answer as faithfulness 1
-(reading it as ungrounded). There is a defensible argument that a correct refusal is perfectly
-faithful (it invents nothing and stays within the context by admitting the context lacks the
-answer) and should score high. Resolving this means a rubric change, which would shift the
-instrument again, so it is deferred rather than folded into this baseline. Tracked as scorer
-prompt-quality work for a later iteration.
+**Scorer bug found and fixed during re-baselining (honesty log).** The very first post-migration
+run reported faithfulness 3.40, and an initial read misattributed that drop to the new judge
+"scoring more decisively." That was wrong. The real cause was a bug introduced earlier the same
+day when the scorer prompt strings were rewrapped to satisfy line-length limits:
+`score_faithfulness` was passing `expected_answer` to the judge instead of `generated_answer`,
+so it had been grading whether the golden answer was grounded in the context rather than whether
+the model's actual answer was. A one-line fix (`generated_answer` in the user message) restored
+the correct measurement, and faithfulness returned to 4.95. Lesson reinforced: a passing eval
+with in-range numbers can still be measuring the wrong thing; read the judge reasoning, not just
+the score. The corrected run is the baseline above.
 
 **Provider coupling, logged.** `messages.parse` / structured outputs is Anthropic-specific API
 surface. Acceptable per the standing posture (Claude is the default for sellable artifacts; the
@@ -220,7 +223,8 @@ judge stays Claude). Invoice-to-JSON (Project 2) is built on this same technique
 head start, not a one-off.
 
 **Files.** Modified: `src/rag_starter/models.py` (field reorder), `src/rag_starter/errors.py`
-(`raw` optional), `evals/scorer.py` (all three scorers).
+(`raw` optional), `evals/scorer.py` (all three scorers migrated to `messages.parse`; also the
+`generated_answer` fix in `score_faithfulness`).
 
 ---
 

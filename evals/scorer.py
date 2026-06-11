@@ -110,7 +110,7 @@ def score_faithfulness(
                         "role": "user",
                         "content": (
                             f"Context:\n{context}\n\nQuestion: {question}\n\n"
-                            f"Answer: {expected_answer}"
+                            f"Answer: {generated_answer}"
                         ),
                     }
                 ],
