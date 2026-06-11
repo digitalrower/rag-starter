@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 620" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#7DD3FC"/>
+    </marker>
+    <marker id="arrowWarm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#FBBF24"/>
+    </marker>
+  </defs>
+
+  <!-- canvas -->
+  <rect x="0" y="0" width="1280" height="620" rx="14" fill="#0F172A"/>
+
+  <!-- title -->
+  <text x="48" y="58" fill="#F1F5F9" font-size="28" font-weight="700">rag-starter</text>
+  <text x="48" y="84" fill="#64748B" font-size="15">retrieval-augmented generation pipeline</text>
+
+  <!-- ===================== INGESTION ROW ===================== -->
+  <text x="48" y="118" fill="#7DD3FC" font-size="12" font-weight="700" letter-spacing="2">INGESTION&#160;&#160;(offline, run once)</text>
+
+  <!-- docs node -->
+  <g>
+    <rect x="48" y="136" width="200" height="110" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="68" y="166" fill="#E2E8F0" font-size="15" font-weight="600">Documents</text>
+    <text x="68" y="190" fill="#94A3B8" font-size="12.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace">./data/*.md</text>
+    <text x="68" y="212" fill="#64748B" font-size="12">markdown corpus</text>
+  </g>
+
+  <!-- chunker node -->
+  <g>
+    <rect x="318" y="136" width="220" height="110" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="338" y="166" fill="#E2E8F0" font-size="15" font-weight="600">Chunking</text>
+    <text x="338" y="190" fill="#94A3B8" font-size="12.5">1,500-char windows</text>
+    <text x="338" y="208" fill="#94A3B8" font-size="12.5">200-char overlap</text>
+    <!-- overlapping chunk tiles motif -->
+    <rect x="455" y="216" width="34" height="20" rx="3" fill="#0F172A" stroke="#475569"/>
+    <rect x="477" y="222" width="34" height="20" rx="3" fill="#0F172A" stroke="#7DD3FC"/>
+  </g>
+
+  <!-- embed node -->
+  <g>
+    <rect x="608" y="136" width="230" height="110" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="628" y="166" fill="#E2E8F0" font-size="15" font-weight="600">Embeddings</text>
+    <text x="628" y="190" fill="#94A3B8" font-size="12.5" font-family="ui-monospace, 'SF Mono', Menlo, monospace">all-MiniLM-L6-v2</text>
+    <text x="628" y="212" fill="#64748B" font-size="12">runs locally, zero API cost</text>
+  </g>
+
+  <!-- chroma node (shared junction) -->
+  <g>
+    <rect x="938" y="136" width="294" height="244" rx="12" fill="#152238" stroke="#7DD3FC" stroke-opacity="0.55"/>
+    <text x="962" y="170" fill="#E2E8F0" font-size="16" font-weight="700">Chroma</text>
+    <text x="962" y="192" fill="#94A3B8" font-size="12.5">persistent vector store</text>
+    <text x="962" y="210" fill="#64748B" font-size="12" font-family="ui-monospace, 'SF Mono', Menlo, monospace">./chroma_db/</text>
+    <!-- vector space dots -->
+    <g fill="#7DD3FC">
+      <circle cx="985" cy="270" r="3.5" opacity="0.9"/>
+      <circle cx="1012" cy="248" r="3" opacity="0.55"/>
+      <circle cx="1045" cy="282" r="4" opacity="0.8"/>
+      <circle cx="1078" cy="252" r="3" opacity="0.5"/>
+      <circle cx="1102" cy="295" r="3.5" opacity="0.85"/>
+      <circle cx="1131" cy="262" r="3" opacity="0.55"/>
+      <circle cx="1160" cy="288" r="4" opacity="0.9"/>
+      <circle cx="1185" cy="250" r="3" opacity="0.5"/>
+      <circle cx="1060" cy="322" r="3" opacity="0.6"/>
+      <circle cx="1120" cy="335" r="3.5" opacity="0.8"/>
+      <circle cx="1003" cy="318" r="3" opacity="0.5"/>
+      <circle cx="1172" cy="330" r="3" opacity="0.6"/>
+    </g>
+    <text x="962" y="362" fill="#64748B" font-size="11.5">cosine similarity over chunk vectors</text>
+  </g>
+
+  <!-- ingestion arrows -->
+  <line x1="248" y1="191" x2="310" y2="191" stroke="#7DD3FC" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="538" y1="191" x2="600" y2="191" stroke="#7DD3FC" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="838" y1="191" x2="930" y2="191" stroke="#7DD3FC" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- ===================== QUERY ROW ===================== -->
+  <text x="48" y="318" fill="#FBBF24" font-size="12" font-weight="700" letter-spacing="2">QUERY&#160;&#160;(per request)</text>
+
+  <!-- question node -->
+  <g>
+    <rect x="48" y="336" width="200" height="110" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="68" y="366" fill="#E2E8F0" font-size="15" font-weight="600">User question</text>
+    <text x="68" y="390" fill="#94A3B8" font-size="12.5">embedded with the</text>
+    <text x="68" y="408" fill="#94A3B8" font-size="12.5">same local model</text>
+  </g>
+
+  <!-- retrieval node -->
+  <g>
+    <rect x="318" y="336" width="220" height="110" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="338" y="366" fill="#E2E8F0" font-size="15" font-weight="600">Retrieval</text>
+    <text x="338" y="390" fill="#94A3B8" font-size="12.5">top-3 chunks by</text>
+    <text x="338" y="408" fill="#94A3B8" font-size="12.5">semantic similarity</text>
+  </g>
+
+  <!-- claude node -->
+  <g>
+    <rect x="608" y="336" width="230" height="110" rx="10" fill="#241D12" stroke="#FBBF24" stroke-opacity="0.6"/>
+    <text x="628" y="366" fill="#F1F5F9" font-size="15" font-weight="600">Claude</text>
+    <text x="628" y="390" fill="#CBA75A" font-size="12.5">grounded generation,</text>
+    <text x="628" y="408" fill="#CBA75A" font-size="12.5">answers only from context</text>
+  </g>
+
+  <!-- answer node -->
+  <g>
+    <rect x="938" y="416" width="294" height="86" rx="10" fill="#1E293B" stroke="#334155"/>
+    <text x="962" y="446" fill="#E2E8F0" font-size="15" font-weight="600">Grounded answer</text>
+    <text x="962" y="470" fill="#94A3B8" font-size="12.5">with source attribution, or "I don't know"</text>
+    <text x="962" y="488" fill="#64748B" font-size="12">when the context lacks the answer</text>
+  </g>
+
+  <!-- query arrows -->
+  <line x1="248" y1="391" x2="310" y2="391" stroke="#FBBF24" stroke-width="2" marker-end="url(#arrowWarm)"/>
+  <!-- retrieval <-> chroma (up to the store) -->
+  <path d="M 428 336 L 428 300 L 930 300" fill="none" stroke="#7DD3FC" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow)"/>
+  <text x="540" y="292" fill="#64748B" font-size="11.5">query vector in, top-3 chunks back</text>
+  <!-- retrieval -> claude -->
+  <line x1="538" y1="391" x2="600" y2="391" stroke="#FBBF24" stroke-width="2" marker-end="url(#arrowWarm)"/>
+  <text x="544" y="378" fill="#64748B" font-size="11.5">context</text>
+  <!-- claude -> answer -->
+  <path d="M 838 391 L 890 391 L 890 459 L 930 459" fill="none" stroke="#FBBF24" stroke-width="2" marker-end="url(#arrowWarm)"/>
+
+  <!-- ===================== OBSERVABILITY BAND ===================== -->
+  <rect x="48" y="528" width="1184" height="56" rx="10" fill="#131C2E" stroke="#334155" stroke-dasharray="5 4"/>
+  <text x="72" y="562" fill="#A5B4FC" font-size="13" font-weight="700">Langfuse tracing</text>
+  <text x="212" y="562" fill="#64748B" font-size="12.5">every retrieval, generation, and judge call traced end to end &#183; token cost and latency per span &#183; eval scores attached per trace</text>
+
+  <!-- eval note, right aligned -->
+  <text x="1232" y="116" fill="#64748B" font-size="12" text-anchor="end">evaluated by an LLM-as-judge harness: faithfulness &#183; relevance &#183; precision@3</text>
+</svg>

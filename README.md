@@ -2,7 +2,7 @@
 
 A production-ready RAG (Retrieval-Augmented Generation) pipeline that ingests documents, embeds them into a vector database, retrieves semantically relevant chunks for a user query, and generates grounded answers using Claude. Built with Chroma, Anthropic, and Python.
 
-![CLI requesting a grounded answer from Claude based on chunks (RAG) from Chroma](./assets/rag-starter.png)
+![rag-starter architecture: documents are chunked, embedded locally, and stored in Chroma; queries retrieve top-3 chunks and Claude generates a grounded answer with source attribution, all traced in Langfuse](./assets/architecture.svg)
 
 ---
 
@@ -23,7 +23,7 @@ A production-ready RAG (Retrieval-Augmented Generation) pipeline that ingests do
 
 A user query flows through four stages:
 
-**Document ingestion and chunking:** Raw markdown files are loaded from `./data/`, split into chunks (default: 500 tokens with 50-token overlap using recursive chunking), and prepared for embedding. Chunking strategy balances retrieval granularity (smaller chunks = more precise results) against context preservation (larger chunks = more surrounding context per result).
+**Document ingestion and chunking:** Raw markdown files are loaded from `./data/`, split into fixed-size chunks (default: 1,500 characters with 200-character overlap, sliding-window), and prepared for embedding. Chunking strategy balances retrieval granularity (smaller chunks = more precise results) against context preservation (larger chunks = more surrounding context per result).
 
 **Embedding and storage:** Each chunk is embedded using Chroma's default sentence-transformer model (all-MiniLM-L6-v2, runs locally, zero API cost). Embeddings are stored in a persistent Chroma collection at `./chroma_db/` alongside metadata (source file, chunk index). The persistent collection survives between runs and can be queried without re-ingesting.
 
@@ -60,7 +60,7 @@ For production, measure against your actual usage patterns before committing to 
 - Embedding quality depends on the corpus. Retrieval is only as good as the embeddings. For domain-specific jargon (medical, legal, technical), consider fine-tuned or domain-specific embedding models in production.
 - Chunk size and overlap are fixed, with no adaptive chunking based on document structure
 - No query expansion or reranking. Retrieved chunks are returned in embedding similarity order without additional refinement
-- Retrieval is the primary weakness. Precision@3 scores 0.30 on edge cases and 0.00 on adversarial queries. Generation is grounded when chunks are found (faithfulness 4.95/5.00 overall), but the pipeline does not reliably retrieve the right chunks for ambiguous or adversarial inputs. Retrieval quality will be the focus of improvement in W9–W12.
+- Retrieval is the primary weakness. Precision@3 scores 0.30 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the focus of improvement in W9–W12. See the eval results below for the full baseline.
 - Persistent collection stored locally, not suitable for multi-user or distributed scenarios without additional infrastructure
 - **Prompt caching not yet implemented.** Anthropic prompt caching will be
   applied at production hardening (W13) once a token-cost baseline is established.
@@ -68,9 +68,11 @@ For production, measure against your actual usage patterns before committing to 
 
 ---
 
-## Eval results (W5E)
+## Eval results (W7E baseline)
 
-Automated eval harness built in W5E using LLM-as-judge scoring (Claude Haiku, temperature=0, JSON output). 40 test cases across four categories. Full dataset: `evals/dataset.json`.
+Automated eval harness using LLM-as-judge scoring (Claude Haiku, temperature=0). 40 test cases across four categories. Full dataset: `evals/dataset.json`.
+
+As of W7E the three judges use Anthropic [structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) (constrained decoding via `messages.parse`), so the judge is guaranteed to return schema-valid JSON rather than free-text that has to be parsed. This replaced an earlier free-text-and-parse approach that intermittently failed when the judge prefaced its JSON with prose. See the note under Results.
 
 ### Metrics
 
@@ -82,25 +84,27 @@ Automated eval harness built in W5E using LLM-as-judge scoring (Claude Haiku, te
 
 | Category | Avg Faithfulness | Avg Relevance | Precision@3 | Count |
 |---|---|---|---|---|
-| happy_path | 5.00 | 3.69 | 0.75 | 16 |
-| edge_case | 4.80 | 2.90 | 0.30 | 10 |
+| happy_path | 5.00 | 3.75 | 0.62 | 16 |
+| edge_case | 4.90 | 2.50 | 0.20 | 10 |
 | adversarial | 5.00 | 5.00 | 0.00 | 4 |
-| bias_paired | 5.00 | 3.40 | 0.60 | 10 |
-| **OVERALL** | **4.95** | **3.55** | **0.53** | **40** |
+| bias_paired | 4.90 | 3.30 | 0.60 | 10 |
+| **OVERALL** | **4.95** | **3.45** | **0.45** | **40** |
+
+n = 40, 0 errored items.
+
+**On the instrument change.** These numbers are consistent with the earlier W5E free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. This run is the canonical baseline going forward. A scorer wiring bug found and fixed during re-baselining is documented in `patterns-applied.md`.
 
 ### Interpretation
 
-Generation is strong: faithfulness is near-perfect across all categories (4.95/5.00), meaning Claude does not hallucinate when chunks are retrieved. The weakness is retrieval: precision@3 drops to 0.30 on edge cases and 0.00 on adversarial queries, which directly explains the lower relevance scores in those categories. When the right chunks aren't retrieved, no generation quality can compensate.
+The pattern that drove the W5E read still holds: the weakness is retrieval, not generation. Precision@3 drops to 0.30 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
 
-The adversarial category (precision@3=0.00, relevance=5.00) shows an interesting pattern: the four adversarial cases scored perfectly on relevance because the system correctly returned "I don't know based on the provided context", the grounding constraint worked as intended, but no chunks were retrieved.
+The adversarial category (precision@3=0.00, relevance=5.00) shows the grounding constraint working as intended: the four adversarial cases scored perfectly on relevance because the system correctly returned "I don't know based on the provided documentation" rather than inventing an answer when no chunks were retrieved.
 
-The gap to close in W9–W12 is retrieval quality, not generation quality.
+The gap to close remains retrieval quality, not generation quality.
 
 ### Bias check
 
-5 paired test cases were added to the eval dataset (`bias_paired` category) where the same factual question was phrased with different demographic or organizational framing (e.g., US vs. EU context, personal hobby vs. commercial production). Faithfulness=5.00 and precision@3=0.60 were consistent across all 10 cases.
-
-Minor relevance variation was observed on 2 of 5 pairs: pair 032 (US vs. EU framing) scored 5 vs. 4 relevance, and pair 033 (personal hobby vs. commercial production) scored 5 vs. 4 relevance. The remaining 3 pairs showed no variation. The likely cause is corpus coverage, EU regulatory and production deployment content is underrepresented in the corpus relative to US and hobby-project content. No model bias was identified; the variation tracks directly to what the corpus contains.
+5 paired test cases (`bias_paired` category) phrase the same factual question with different demographic or organizational framing (e.g. US vs. EU context, personal hobby vs. commercial production). Scores were consistent across the paired cases, with minor relevance variation on 2 of 5 pairs that tracks to corpus coverage (EU regulatory and production-deployment content is underrepresented relative to US and hobby-project content) rather than model bias.
 
 ---
 
@@ -182,7 +186,7 @@ Documents should be placed in `./data/` as markdown or text files.
 
 This will:
 1. Load all `.md` files from `./data/`
-2. Chunk them (500 tokens, 50-token overlap)
+2. Chunk them (1,500 characters, 200-character overlap)
 3. Embed and store in `./chroma_db/`
 4. Print a summary: "Ingested X chunks from Y documents"
 
@@ -199,11 +203,12 @@ The collection is persistent. Run this once, then query as many times as you wan
 **Output:**
 
 ```
-{
-    'answer': "Based on the provided documentation, **Agent Skills** are modular capabilities that extend Claude's functionality. Here are the key points:\n\n## What They Are\nEach Skill packages instructions, metadata, and optional resources (scripts, templates) that Claude uses automatically when relevant.\n\n## Why Use Them\nSkills are reusable, filesystem-based resources that provide Claude with domain-specific expertise: workflows, context, and best practices that transform general-purpose agents into specialists. Key benefits include:\n\n- **Specialize Claude**: Tailor capabilities for domain-specific tasks\n- **Reduce repetition**: Create once, use automatically across multiple conversations\n- **Compose capabilities**: Combine Skills to build complex workflows\n\n## Types of Skills\n\n1. **Pre-built Agent Skills**: Anthropic provides pre-built Skills for common document tasks (PowerPoint, Excel, Word, PDF). These are available on claude.ai, the Claude API, Claude Platform on AWS, and Microsoft Foundry.\n\n2. **Custom Skills**: You can create your own Skills to package domain expertise and organizational knowledge. These are available across Claude's products and can be created in Claude Code, uploaded through the Claude API, or added in claude.ai settings.\n\nUnlike prompts (which are conversation-level instructions for one-off tasks), Skills load on-demand and eliminate the need to repeatedly provide the same guidance across multiple conversations.", 
-    'sources': ['agent-skills.md', 'managed-agents-overview.md']
-}
+Answer: Based on the provided documentation, **Agent Skills** are modular
+capabilities that extend Claude's functionality. Each Skill packages
+instructions, metadata, and optional resources (scripts, templates) that
+Claude uses automatically when relevant. [...]
 
+Sources: ['agent-skills.md', 'managed-agents-overview.md']
 ```
 
 
@@ -256,6 +261,9 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     ├── src/
     │   └── rag_starter/
     │       ├── __init__.py
+    │       ├── client.py         # Centralized Anthropic client factory (retries, timeouts)
+    │       ├── errors.py         # Typed RAGError hierarchy
+    │       ├── models.py         # Pydantic boundary models (Chunk, QueryResponse, ScoreResult, ...)
     │       ├── ingest.py         # Load, chunk, embed, store
     │       └── query.py          # Retrieve, generate, return grounded answer (Langfuse traced)
     ├── evals/
@@ -274,6 +282,7 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     ├── .gitignore
     ├── .python-version
     ├── requirements.txt
+    ├── patterns-applied.md       # Production patterns applied in W7E (sources, rationale, eval)
     └── README.md                 
 
 ---
@@ -284,8 +293,8 @@ Edit these parameters in `src/ingest.py` to tune ingestion behavior:
 
 | Parameter | Default | Impact |
 |-----------|---------|--------|
-| `chunk_size` | 500 tokens | Larger = more context per chunk, fewer total chunks. Smaller = more granular retrieval, more chunks. |
-| `chunk_overlap` | 50 tokens | Overlap between adjacent chunks. Prevents context loss at chunk boundaries. |
+| `chunk_size` | 1,500 characters | Larger = more context per chunk, fewer total chunks. Smaller = more granular retrieval, more chunks. |
+| `overlap` | 200 characters | Overlap between adjacent chunks. Prevents context loss at chunk boundaries. |
 
 ---
 
@@ -312,7 +321,9 @@ Edit these parameters in `src/query.py` to tune retrieval behavior:
 
 **Output:**
 
-    Ingested 145 chunks from 4 documents into collection 'anthropic_docs'
+    Added chunk 145 from agent-skills.md
+    Total chunks added 145
+    Total chunks in collection: 145
 
 **Effect:** Creates or updates `./chroma_db/` with the persistent collection.
 
@@ -328,12 +339,13 @@ Edit these parameters in `src/query.py` to tune retrieval behavior:
 
 **Output:**
 
-```json
-{
-  "answer": "Claude's grounded answer based on retrieved context...",
-  "sources": ["source-file-1.md", "source-file-2.md"]
-}
 ```
+Answer: Claude's grounded answer based on retrieved context...
+
+Sources: ['source-file-1.md', 'source-file-2.md']
+```
+
+Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answer`, `sources`, `chunks`, `trace_id`); see `src/rag_starter/models.py`.
 
 **Behavior:**
 - Returns top-3 semantically similar chunks
@@ -349,6 +361,7 @@ Edit these parameters in `src/query.py` to tune retrieval behavior:
 - **Source attribution:** Every answer includes which documents the chunks came from, enabling verification and trust.
 - **Grounding constraints:** System prompt explicitly prevents hallucination by instructing Claude to say "I don't know" when context is insufficient.
 - **Modular functions:** Separate `retrieve_chunks()`, `build_prompt()`, and `generate_answer()` functions are importable for use in other projects (Streamlit demos, FastAPI services, eval harnesses).
+- **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), API and parse failures raise a typed `RAGError` hierarchy, and the eval runner isolates per-item failures so one bad item never corrupts a run. Details in `patterns-applied.md`.
 
 ---
 
@@ -371,6 +384,8 @@ Common issues and solutions:
 - [Chroma](https://docs.trychroma.com/): Vector database (local persistence)
 - [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python): Claude API client
 - [sentence-transformers](https://www.sbert.net/): Embedding model (runs locally via Chroma)
+- [Pydantic](https://docs.pydantic.dev/): Validated models at every layer boundary
+- [Langfuse](https://langfuse.com/): Tracing, cost/latency capture, and eval score tracking
 - [python-dotenv](https://github.com/theskumar/python-dotenv): Environment variable management
 
 ---
@@ -403,7 +418,8 @@ Run the same query through `src/query.py` (with retrieval) and compare to Claude
 ## Next steps
 
 - **W6E (done):** Langfuse observability. Per-query tracing with nested retrieval, generation, and scorer spans; cost and latency capture; eval scores emitted as score objects and grouped by session. See the Observability section above.
-- **W7E:** Migrate the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI.
+- **W7E (done):** Production codebase deep-dive (Anthropic Python SDK). Applied a centralized client factory, typed Pydantic boundaries, a typed error hierarchy, and structured-output judging for eval reliability. See `patterns-applied.md`.
+- **W7E / next:** Migrate the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI.
 - **W9:** Adapt ingestion and retrieval logic for Project 1 (Docs Copilot), same architecture, different corpus. Retrieval quality (precision@3) is the primary gap to address at this stage.
 - **W13:** Add prompt caching to reduce redundant token cost on repeated queries.
 - **W28+:** Benchmark against OpenAI's long-context APIs to decide when RAG is overkill.
