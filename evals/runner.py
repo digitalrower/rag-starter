@@ -1,3 +1,4 @@
+import argparse
 import json
 import logging
 import sys
@@ -39,7 +40,6 @@ def load_dataset(path: Path) -> list[EvalItem]:
 def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[EvalResult]:
     run_id = f"eval-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
     results = []
-    # for item in dataset[26:27]:  # use for smoke test; $ python -m evals.runner
     for item in dataset:
         with (
             propagate_attributes(session_id=run_id, tags=["eval", item.category]),
@@ -224,8 +224,41 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
 if __name__ == "__main__":
     configure_logging()
 
+    parser = argparse.ArgumentParser(description="Evaluation Runner for AI datasets")
+
+    # Mutually Exclusive Group (Enforces either/or logic)
+    group = parser.add_mutually_exclusive_group()
+
+    group.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Run only the first N items",
+    )
+
+    # Nargs="+" (Accepts a space-separated list of strings into an array)
+    group.add_argument(
+        "--ids",
+        nargs="+",
+        default=None,
+        help="Run only items with these specific IDs (e.g. --ids 027 031)",
+    )
+
+    args = parser.parse_args()
+
     DATASET_PATH = Path(__file__).parent / "dataset.json"
     dataset = load_dataset(DATASET_PATH)
+
+    # Filtering Logic
+    if args.ids is not None:
+        wanted_ids = set(args.ids)  # convert to set for O(1) lookups
+        dataset = [item for item in dataset if item.id in wanted_ids]
+        if not dataset:
+            logging.error(f"No matching items found for IDs: {args.ids}")
+            sys.exit(1)
+    elif args.limit is not None:
+        dataset = dataset[: args.limit]
+
     collection = query.get_collection()
     graded = run_eval(dataset, collection)
     RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
