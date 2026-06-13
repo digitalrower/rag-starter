@@ -1,16 +1,29 @@
-# --- Python/Environment - Generated build artifacts ---
+# =============================================================
+# Sections tagged [PROJECT-SPECIFIC] are meant to be trimmed
+# or replaced per project. Everything above them is universal.
+# =============================================================
+
+# --- Python build artifacts ---
 __pycache__/
 *.pyc
-.env/
 dist/
 build/
 *.egg-info/
 
-# Virtual environment
+# --- Virtual environments ---
 .venv/
 venv/
+.env/
 
-# --- OS / IDE files ---
+# --- Secrets / environment variables (NEVER commit) ---
+.env
+.env.local
+.env.*.local
+*.pem
+keys/
+secrets.json
+
+# --- OS / IDE / tooling ---
 .DS_Store
 Thumbs.db
 .vscode/
@@ -18,20 +31,7 @@ Thumbs.db
 .ipynb_checkpoints/
 .claude/
 
-# Environment variables — NEVER commit
-.env
-.env.local
-.env.*.local
-
-# --- Sensitive Data ---
-*.pem
-keys/
-secrets.json
-
-# --- Database ---
-chroma_db/
-
-# --- ML Artifacts/Data ---
+# --- ML artifacts & datasets ---
 data/
 models/
 checkpoints/
@@ -41,4 +41,8 @@ checkpoints/
 *.parquet
 *.csv
 
+# --- [PROJECT-SPECIFIC] Vector store / local DB ---
+chroma_db/
 
+# --- [PROJECT-SPECIFIC] Misc ---
+scripts/utilities/

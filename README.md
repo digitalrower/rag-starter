@@ -60,7 +60,7 @@ For production, measure against your actual usage patterns before committing to 
 - Embedding quality depends on the corpus. Retrieval is only as good as the embeddings. For domain-specific jargon (medical, legal, technical), consider fine-tuned or domain-specific embedding models in production.
 - Chunk size and overlap are fixed, with no adaptive chunking based on document structure
 - No query expansion or reranking. Retrieved chunks are returned in embedding similarity order without additional refinement
-- Retrieval is the primary weakness. Precision@3 scores 0.30 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the focus of improvement in W9–W12. See the eval results below for the full baseline.
+- Retrieval is the primary weakness. Precision@3 scores 0.20 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the focus of improvement in W9–W12. See the eval results below for the full baseline.
 - Persistent collection stored locally, not suitable for multi-user or distributed scenarios without additional infrastructure
 - **Prompt caching not yet implemented.** Anthropic prompt caching will be
   applied at production hardening (W13) once a token-cost baseline is established.
@@ -96,7 +96,7 @@ n = 40, 0 errored items.
 
 ### Interpretation
 
-The pattern that drove the W5E read still holds: the weakness is retrieval, not generation. Precision@3 drops to 0.30 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
+The pattern that drove the W5E read still holds: the weakness is retrieval, not generation. Precision@3 drops to 0.20 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
 
 The adversarial category (precision@3=0.00, relevance=5.00) shows the grounding constraint working as intended: the four adversarial cases scored perfectly on relevance because the system correctly returned "I don't know based on the provided documentation" rather than inventing an answer when no chunks were retrieved.
 
@@ -141,6 +141,16 @@ Latency is captured per span at p50/p90/p95/p99, broken out by trace, generation
 ### Why Langfuse
 
 Langfuse is open source and self-hostable, with a free Cloud tier that covers a project at this scale at no cost. Tracing, score emission, and dashboards all work the same whether running against Langfuse Cloud or a self-hosted instance, so the same instrumentation carries forward to later projects without rework.
+
+### Eval experiments (W7E)
+
+The eval dataset is also mirrored into a Langfuse Dataset (`rag-starter-eval`), and `evals/experiment.py` runs the same RAG pipeline and the same three judges through Langfuse's experiment runner. Each run links every generation to its dataset item and attaches the three scores, so two runs can be compared item by item in the Experiments UI, with per-metric deltas highlighted.
+
+    python -m evals.experiment --name run-1
+
+This path is additive and does not replace the canonical local harness. `runner.py`, `results.json`, and `summary.json` remain the source of truth for the baseline; the managed experiment path is for run-over-run comparison in the UI and to seed the methodology that scales to later projects. The seed step is a one-time `python -m scripts.seed_langfuse_dataset`.
+
+![Langfuse Experiments compare view: two runs of the same pipeline side by side, scores per item with run-over-run deltas highlighted](./assets/langfuse-experiments-compare.png)
 
 ---
 
@@ -232,13 +242,13 @@ Type checking and linting run automatically in CI on every push via GitHub Actio
 
 To run locally before pushing:
 
-    mypy src/
-    ruff check src/
-    ruff format --check src/
+    mypy src/ evals/ scripts/
+    ruff check src/ evals/ scripts/
+    ruff format --check src/ evals/ scripts/
 
 To auto-fix ruff violations in place:
 
-    ruff format src/
+    ruff format src/ evals/ scripts/
 
 ---
 
@@ -269,10 +279,13 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     ├── evals/
     │   ├── dataset.json          # 40 golden Q/A pairs (happy_path, edge_case, adversarial, bias_paired)
     │   ├── scorer.py             # LLM-as-judge scoring logic
-    │   ├── runner.py             # Orchestrates eval run; per-item tracing + score emission
+    │   ├── runner.py             # Canonical eval run; per-item tracing + score emission, writes results/
+    │   ├── experiment.py         # Additive Langfuse Datasets/Experiments runner (run-over-run compare)
     │   └── results/
     │       ├── results.json      # Per-item eval output
     │       └── summary.json      # Per-category and overall averages
+    ├── scripts/
+    │   └── seed_langfuse_dataset.py  # One-time seed of dataset.json into a Langfuse Dataset
     ├── assets/                   # README screenshots (Langfuse dashboard, latency)
     ├── tests/
     ├── data/                     # Source documents (markdown/text) 
@@ -419,7 +432,7 @@ Run the same query through `src/query.py` (with retrieval) and compare to Claude
 
 - **W6E (done):** Langfuse observability. Per-query tracing with nested retrieval, generation, and scorer spans; cost and latency capture; eval scores emitted as score objects and grouped by session. See the Observability section above.
 - **W7E (done):** Production codebase deep-dive (Anthropic Python SDK). Applied a centralized client factory, typed Pydantic boundaries, a typed error hierarchy, and structured-output judging for eval reliability. See `patterns-applied.md`.
-- **W7E / next:** Migrate the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI.
+- **W7E (done):** Migrated the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI. Additive to the canonical local harness. See the Eval experiments section above.
 - **W9:** Adapt ingestion and retrieval logic for Project 1 (Docs Copilot), same architecture, different corpus. Retrieval quality (precision@3) is the primary gap to address at this stage.
 - **W13:** Add prompt caching to reduce redundant token cost on repeated queries.
 - **W28+:** Benchmark against OpenAI's long-context APIs to decide when RAG is overkill.

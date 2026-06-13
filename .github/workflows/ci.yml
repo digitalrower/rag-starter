@@ -21,8 +21,8 @@ jobs:
           pip install mypy ruff
           pip install -e .
       - name: Run ruff lint
-        run: ruff check src/ evals/
+        run: ruff check src/ evals/ scripts/
       - name: Run ruff format check
-        run: ruff format --check src/ evals/
+        run: ruff format --check src/ evals/ scripts/
       - name: Run mypy
-        run: mypy src/ evals/
+        run: mypy src/ evals/ scripts/
