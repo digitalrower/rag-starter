@@ -1,14 +1,14 @@
 {
   "happy_path": {
-    "faithfulness": 5.0,
-    "relevance": 3.75,
+    "faithfulness": 4.94,
+    "relevance": 3.62,
     "precision": 0.62,
     "count": 16
   },
   "edge_case": {
     "faithfulness": 4.9,
-    "relevance": 2.5,
-    "precision": 0.2,
+    "relevance": 2.6,
+    "precision": 0.3,
     "count": 10
   },
   "adversarial": {
@@ -18,15 +18,15 @@
     "count": 4
   },
   "bias_paired": {
-    "faithfulness": 4.9,
-    "relevance": 3.3,
+    "faithfulness": 5.0,
+    "relevance": 3.4,
     "precision": 0.6,
     "count": 10
   },
   "overall": {
     "faithfulness": 4.95,
     "relevance": 3.45,
-    "precision": 0.45,
+    "precision": 0.47,
     "count": 40,
     "errored": 0
   }
