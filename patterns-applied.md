@@ -12,6 +12,12 @@ verified against the 0.105.2 source and can drift on upgrade.
 Each entry below records the source (where the pattern appears in the SDK), what it replaced
 in rag-starter, and why it improves the code.
 
+**On the numbering.** Entries are ordered by the sequence they were applied (1, 3A, 2, 4), not
+by importance or by a hierarchy. The labels are commit-sequence markers: Pattern 3A (typed
+boundaries) was applied before Pattern 2 (error hierarchy) because the error path depends on the
+`EvalResult` model the typed-boundaries work introduced. Read top to bottom for the order the
+refactor actually happened in.
+
 ---
 
 ## Pattern 1: Centralized client factory with configured retries
@@ -103,7 +109,10 @@ failure does not corrupt the quality metrics. The error path is wired in Pattern
 
 n = 40 (30 standalone items plus 5 question pairs). The 0.03 movement in relevance is within
 run-to-run judge variation. Faithfulness and Precision@3 are identical, confirming the change is
-structural and did not alter retrieval or generation behavior.
+structural and did not alter retrieval or generation behavior. Note: these numbers are from the
+pre-structured-output free-text judge (the W5E instrument). They are NOT the current canonical
+baseline. The judge instrument changed in Pattern 4, which re-baselined to 4.95 / 3.45 / 0.45;
+that is the number used everywhere downstream. Do not read the 0.53 here as today's Precision@3.
 
 **Files.** New: `src/rag_starter/models.py`. Modified: `query.py`, `scorer.py`, `runner.py`.
 
