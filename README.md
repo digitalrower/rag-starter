@@ -110,7 +110,7 @@ The gap to close remains retrieval quality, not generation quality.
 
 ## Observability (W6E)
 
-Every query and every eval run is traced end to end with [Langfuse](https://langfuse.com/). Instrumentation uses the Langfuse Python SDK (v3) context-manager pattern, so latency is timed automatically per span and cost is computed from the model name plus token usage passed on each generation.
+Every query and every eval run is traced end to end with [Langfuse](https://langfuse.com/). Instrumentation uses the Langfuse Python SDK (v4) context-manager pattern, so latency is timed automatically per span and cost is computed from the model name plus token usage passed on each generation.
 
 ### What gets traced
 
@@ -192,13 +192,13 @@ Documents should be placed in `./data/` as markdown or text files.
 
 **Run the ingestion pipeline:**
 
-    python -m src.ingest
+    python -m rag_starter.ingest
 
 This will:
 1. Load all `.md` files from `./data/`
 2. Chunk them (1,500 characters, 200-character overlap)
 3. Embed and store in `./chroma_db/`
-4. Print a summary: "Ingested X chunks from Y documents"
+4. Print a summary of the total chunks added and the collection count
 
 The collection is persistent. Run this once, then query as many times as you want without re-ingesting.
 
@@ -208,7 +208,7 @@ The collection is persistent. Run this once, then query as many times as you wan
 
 **From the command line:**
 
-    python -m src.query "What are agent skills?"
+    python -m rag_starter.query "What are agent skills?"
 
 **Output:**
 
@@ -302,7 +302,7 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
 
 ## Ingest configuration
 
-Edit these parameters in `src/ingest.py` to tune ingestion behavior:
+Edit these parameters in `src/rag_starter/ingest.py` to tune ingestion behavior:
 
 | Parameter | Default | Impact |
 |-----------|---------|--------|
@@ -313,7 +313,7 @@ Edit these parameters in `src/ingest.py` to tune ingestion behavior:
 
 ## Retrieval configuration
 
-Edit these parameters in `src/query.py` to tune retrieval behavior:
+Edit these parameters in `src/rag_starter/query.py` to tune retrieval behavior:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
@@ -330,7 +330,7 @@ Edit these parameters in `src/query.py` to tune retrieval behavior:
 
 **Command:**
 
-    python -m src.ingest
+    python -m rag_starter.ingest
 
 **Output:**
 
@@ -348,7 +348,7 @@ Edit these parameters in `src/query.py` to tune retrieval behavior:
 
 **Command:**
 
-    python -m src.query "your question here"
+    python -m rag_starter.query "your question here"
 
 **Output:**
 
@@ -384,7 +384,7 @@ Common issues and solutions:
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `Collection not found` | `ingest.py` hasn't been run yet | Run `python -m src.ingest` first |
+| `Collection not found` | `ingest.py` hasn't been run yet | Run `python -m rag_starter.ingest` first |
 | `ANTHROPIC_API_KEY not set` | Missing `.env` file or key | Copy `.env.example` to `.env` and add your key |
 | `AuthenticationError` | Invalid API key | Verify key at console.anthropic.com |
 | `RateLimitError` | Too many requests to Claude | Wait a moment and retry |
@@ -409,19 +409,19 @@ Use these scenarios to verify grounding behavior manually, or as a sanity check 
 
 **Test 1, answerable query:**
 
-    python -m src.query "What are agent skills?"
+    python -m rag_starter.query "What are agent skills?"
 
 Expected: Claude answers confidently and cites source chunks.
 
 **Test 2, unanswerable query:**
 
-    python -m src.query "what is the capital of mars"
+    python -m rag_starter.query "what is the capital of mars"
 
 Expected: Claude says "I don't know based on the provided context" (no hallucination).
 
 **Test 3, before/after comparison:**
 
-Run the same query through `src/query.py` (with retrieval) and compare to Claude's answer without retrieval (just the system prompt and question, no context). 
+Run the same query through `src/rag_starter/query.py` (with retrieval) and compare to Claude's answer without retrieval (just the system prompt and question, no context). 
 - Does retrieval change the answer?
 - Is the grounded answer more accurate or more cautious?
 - Does Claude cite sources when retrieval is used?
