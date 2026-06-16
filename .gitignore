@@ -30,6 +30,7 @@ Thumbs.db
 .idea/
 .ipynb_checkpoints/
 .claude/
+CLAUDE.local.md
 
 # --- ML artifacts & datasets ---
 data/
