@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 from dotenv import load_dotenv
 
@@ -11,31 +12,47 @@ from langfuse import Evaluation, get_client
 
 from evals.scorer import score_answer_relevance, score_faithfulness, score_precision
 from rag_starter import query
+from rag_starter.errors import RAGError
 
 DATASET_NAME_DEFAULT = "rag-starter-eval"
+
+logger = logging.getLogger(__name__)
 
 
 def make_task(collection: query.Collection) -> Callable[..., dict]:
     """Factory: closes over the Chroma collection so the task matches the SDK signature."""
 
     def task(*, item: Any, **kwargs: Any) -> dict:
-        generated_result = query.main(collection, item.input)
-        chunks_text = [c.text for c in generated_result.chunks]
+        try:
+            generated_result = query.main(collection, item.input)
+            chunks_text = [c.text for c in generated_result.chunks]
 
-        response_dict = {
-            "answer": generated_result.answer,
-            "chunks": chunks_text,
-            "sources": generated_result.sources,
-        }
+            response_dict = {
+                "answer": generated_result.answer,
+                "chunks": chunks_text,
+                "sources": generated_result.sources,
+            }
 
-        return response_dict
+            return response_dict
+
+        except RAGError as e:
+            logger.error(f"Eval item {item.id} query.main failed: {e}")
+            return {
+                "error": str(e),
+                "answer": "",
+                "chunks": [],
+                "sources": [],
+            }
 
     return task
 
 
 def faithfulness_evaluator(
     *, input: Any, output: Any, expected_output: Any, metadata: Any, **kwargs: Any
-) -> Evaluation:
+) -> Evaluation | list[Evaluation]:
+
+    if output.get("error"):
+        return []
 
     question = input
     generated_answer = output["answer"]
@@ -49,7 +66,10 @@ def faithfulness_evaluator(
 
 def relevance_evaluator(
     *, input: Any, output: Any, expected_output: Any, metadata: Any, **kwargs: Any
-) -> Evaluation:
+) -> Evaluation | list[Evaluation]:
+
+    if output.get("error"):
+        return []
 
     question = input
     generated_answer = output["answer"]
@@ -62,7 +82,10 @@ def relevance_evaluator(
 
 def precision_evaluator(
     *, input: Any, output: Any, expected_output: Any, metadata: Any, **kwargs: Any
-) -> Evaluation:
+) -> Evaluation | list[Evaluation]:
+
+    if output.get("error"):
+        return []
 
     question = input
     retrieved_chunks = output["chunks"]
