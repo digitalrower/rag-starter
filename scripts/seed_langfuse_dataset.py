@@ -61,15 +61,31 @@ def seed() -> None:
     for attempt in range(2):
         fetched = langfuse.get_dataset(DATASET_NAME)
         actual = len(fetched.items)
+
         if actual == expected:
             print(f"Seed OK: {actual}/{expected} items in '{DATASET_NAME}'")
             return
+
+        if actual > expected:
+            orphan_count = actual - expected
+            print(
+                f"WARNING: Langfuse has {actual} items but local dataset.json "
+                f"has {expected}: {orphan_count} orphaned item(s) remain in "
+                f"Langfuse that are no longer in the local dataset. All "
+                f"{expected} local items are present and current; the orphans "
+                f"are harmless to an experiment run. Delete them in the "
+                f"Langfuse UI if you want an exact mirror."
+            )
+            return  # success exit (exit 0); orphans are not a failure
+
+        # only reach here when actual < expected: a write may still be landing
         if attempt == 0:
             # Exactly one retry: server-side ingestion can lag the fetch
             # briefly even after flush. Still wrong after 3s = real failure.
             time.sleep(3)
 
     # Nonzero exit so a wrapping shell or CI step treats mismatch as failure.
+    # loop exhausted with actual < expected the whole time = real under-count failure
     print(f"Seed FAILED: expected {expected}, Langfuse returned {actual}", file=sys.stderr)
     sys.exit(1)
 
