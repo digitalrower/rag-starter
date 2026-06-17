@@ -84,6 +84,12 @@ def generate_answer(prompt: str) -> str:
                 messages=[{"role": "user", "content": prompt}],
             )
 
+            if not message.content:
+                error_msg = f"API returned no content blocks (stop_reason={message.stop_reason})"
+                logger.error(f"Generation failed: {error_msg}")
+                gen.update(level="ERROR", status_message=error_msg)
+                raise GenerationError(error_msg)
+
             block = message.content[0]
             output_text = block.text if isinstance(block, TextBlock) else ""
 
