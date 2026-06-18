@@ -6,7 +6,7 @@ from langfuse import get_client
 
 from rag_starter.client import get_anthropic_client
 from rag_starter.errors import ResponseParseError, ScoringError
-from rag_starter.models import ScoreResult
+from rag_starter.models import BinaryScore, RatingsScore
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 def score_precision(
     question: str, retrieved_chunks: list[str], expected_answer: str
-) -> ScoreResult:
+) -> BinaryScore:
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_precision",
@@ -54,7 +54,7 @@ def score_precision(
                         ),
                     }
                 ],
-                output_format=ScoreResult,
+                output_format=BinaryScore,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
@@ -79,7 +79,7 @@ def score_faithfulness(
     retrieved_chunks: list[str],
     generated_answer: str,
     expected_answer: str,
-) -> ScoreResult:
+) -> RatingsScore:
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_faithfulness",
@@ -114,7 +114,7 @@ def score_faithfulness(
                         ),
                     }
                 ],
-                output_format=ScoreResult,
+                output_format=RatingsScore,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"
@@ -136,7 +136,7 @@ def score_faithfulness(
 
 def score_answer_relevance(
     question: str, generated_answer: str, expected_answer: str
-) -> ScoreResult:
+) -> RatingsScore:
     with langfuse.start_as_current_observation(
         as_type="span",
         name="scorer_relevance",
@@ -171,7 +171,7 @@ def score_answer_relevance(
                         ),
                     }
                 ],
-                output_format=ScoreResult,
+                output_format=RatingsScore,
             )
         except APIError as e:
             error_msg = f"Couldn't reach Claude: {e}"

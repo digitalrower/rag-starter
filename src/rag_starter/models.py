@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Chunk(BaseModel):
@@ -15,10 +15,16 @@ class QueryResponse(BaseModel):
     trace_id: str
 
 
-class ScoreResult(BaseModel):
+class RatingsScore(BaseModel):  # faithfulness, relevance (1-5)
     model_config = ConfigDict(extra="forbid")
     reasoning: str
-    score: int
+    score: int = Field(ge=1, le=5)
+
+
+class BinaryScore(BaseModel):  # precision (0 or 1)
+    model_config = ConfigDict(extra="forbid")
+    reasoning: str
+    score: int = Field(ge=0, le=1)
 
 
 class EvalItem(BaseModel):
