@@ -235,6 +235,15 @@ head start, not a one-off.
 (`raw` optional), `evals/scorer.py` (all three scorers migrated to `messages.parse`; also the
 `generated_answer` fix in `score_faithfulness`).
 
+**Later change (pre-fork review, post-W7E).** The `ScoreResult` model named throughout this file
+was split into two per-metric models during the pre-fork review: `RatingsScore` (`score`
+constrained `ge=1, le=5`, for faithfulness and relevance) and `BinaryScore` (`score` constrained
+`ge=0, le=1`, for precision). The single shared model could not carry a correct range bound
+because the metrics have different valid ranges, so an out-of-range judge value was silently
+folded into the averages. The `ScoreResult` references above are accurate as the W7E history;
+the current code uses the two split models. See the `## Claude Code review` section in the W7E
+week file (Finding 4) for the rationale.
+
 ---
 
 ## What these patterns do not do

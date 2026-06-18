@@ -44,7 +44,7 @@ This implementation uses chunked retrieval (RAG): splitting the corpus into piec
 - Scales gracefully as the corpus grows
 
 **When long-context beats RAG:**
-As of 2025, Anthropic's Sonnet 4.6 and Opus 4.6 support 1M-token context at flat-rate pricing. For corpora that fit entirely in context (most documents under ~800K tokens), a single long-context call is often simpler and sometimes cheaper than chunking + retrieval. 
+As of 2026, Anthropic's current models (Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6) support a 1M-token context window at standard pricing. For corpora that fit entirely in context (most documents under ~800K tokens), a single long-context call is often simpler and sometimes cheaper than chunking + retrieval. 
 
 If you're building a similar system for a different corpus, benchmark both approaches:
 - Time and cost to ingest and maintain RAG pipeline
@@ -273,7 +273,7 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     │       ├── __init__.py
     │       ├── client.py         # Centralized Anthropic client factory (retries, timeouts)
     │       ├── errors.py         # Typed RAGError hierarchy
-    │       ├── models.py         # Pydantic boundary models (Chunk, QueryResponse, ScoreResult, ...)
+    │       ├── models.py         # Pydantic boundary models (Chunk, QueryResponse, RatingsScore, BinaryScore, ...)
     │       ├── ingest.py         # Load, chunk, embed, store
     │       └── query.py          # Retrieve, generate, return grounded answer (Langfuse traced)
     ├── evals/
