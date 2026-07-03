@@ -54,7 +54,7 @@ def run_eval(dataset: list[EvalItem], collection: query.Collection) -> list[Eval
             ) as item_span,
         ):
             try:
-                generated_result = query.main(collection, item.question)
+                generated_result = query.main_sync(collection, item.question)
                 chunks_text = [c.text for c in generated_result.chunks]
 
                 faithfulness = score_faithfulness(

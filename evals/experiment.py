@@ -24,7 +24,7 @@ def make_task(collection: query.Collection) -> Callable[..., dict]:
 
     def task(*, item: Any, **kwargs: Any) -> dict:
         try:
-            generated_result = query.main(collection, item.input)
+            generated_result = query.main_sync(collection, item.input)
             chunks_text = [c.text for c in generated_result.chunks]
 
             response_dict = {
@@ -36,7 +36,7 @@ def make_task(collection: query.Collection) -> Callable[..., dict]:
             return response_dict
 
         except RAGError as e:
-            logger.error(f"Eval item {item.id} query.main failed: {e}")
+            logger.error(f"Eval item {item.id} query.main_sync failed: {e}")
             return {
                 "error": str(e),
                 "answer": "",

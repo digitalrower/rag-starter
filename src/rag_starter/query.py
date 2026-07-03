@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 from typing import cast
@@ -8,9 +9,9 @@ from anthropic.types import TextBlock
 from chromadb import Collection
 from langfuse import get_client, propagate_attributes
 
-from rag_starter.client import get_anthropic_client
+from rag_starter.client import get_async_anthropic_client
 from rag_starter.errors import GenerationError
-from rag_starter.models import Chunk, QueryResponse
+from rag_starter.models import BatchResult, Chunk, QueryResponse
 
 # from dotenv import load_dotenv
 # load_dotenv()
@@ -63,7 +64,7 @@ def build_prompt(user_question: str, chunks: list[Chunk]) -> str:
     return prompt
 
 
-def generate_answer(prompt: str) -> str:
+async def generate_answer(prompt: str) -> str:
     model_name = "claude-haiku-4-5-20251001"
     with langfuse.start_as_current_observation(
         as_type="generation",
@@ -71,14 +72,14 @@ def generate_answer(prompt: str) -> str:
         model=model_name,
         input={"messages": [{"role": "user", "content": prompt}]},
     ) as gen:
-        client = get_anthropic_client()
+        client = get_async_anthropic_client()
 
         # COST NOTE: Anthropic prompt caching (cache_control breakpoints) will be
         # applied to this system prompt + retrieved context at W13 once we have
         # a measurable token baseline. At W4 scale, caching adds complexity without
         # a benchmark to justify it. See W13 hardening sprint.
         try:
-            message = client.messages.create(
+            message = await client.messages.create(
                 model=model_name,
                 max_tokens=500,
                 messages=[{"role": "user", "content": prompt}],
@@ -114,7 +115,7 @@ def generate_answer(prompt: str) -> str:
             raise GenerationError(error_msg) from e
 
 
-def main(
+async def main(
     collection: Collection,
     user_question: str,
     session_id: str | None = None,
@@ -134,11 +135,11 @@ def main(
             with propagate_attributes(session_id=session_id, tags=tags or []):
                 chunks = retrieve_chunks(collection, user_question)
                 prompt = build_prompt(user_question, chunks)
-                answer = generate_answer(prompt)
+                answer = await generate_answer(prompt)
         else:
             chunks = retrieve_chunks(collection, user_question)
             prompt = build_prompt(user_question, chunks)
-            answer = generate_answer(prompt)
+            answer = await generate_answer(prompt)
 
         sources: list[str] = list(dict.fromkeys(item.source for item in chunks))
         response = QueryResponse(
@@ -153,6 +154,46 @@ def main(
     return response
 
 
+def main_sync(
+    collection: Collection,
+    user_question: str,
+    session_id: str | None = None,
+    tags: list[str] | None = None,
+) -> QueryResponse:
+    return asyncio.run(main(collection, user_question, session_id, tags))
+
+
+async def main_batch(
+    collection: Collection,
+    questions: list[str],
+    session_id: str | None = None,
+    tags: list[str] | None = None,
+    max_concurrency: int = 5,
+) -> BatchResult:
+
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def run_one(q: str) -> QueryResponse:
+        async with semaphore:
+            return await main(collection, q, session_id=session_id, tags=tags)
+
+    coroutines = [run_one(q) for q in questions]
+
+    results = await asyncio.gather(*coroutines, return_exceptions=True)
+
+    successes: list[QueryResponse] = []
+    failures: list[tuple[str, BaseException]] = []
+
+    for question, outcome in zip(questions, results, strict=True):
+        if isinstance(outcome, BaseException):
+            failures.append((question, outcome))
+            logger.error(f"Batch run failed: {question}: {outcome}")
+        else:
+            successes.append(outcome)
+
+    return BatchResult(successes=successes, failures=failures)
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
@@ -163,7 +204,7 @@ if __name__ == "__main__":
         user_question = " ".join(sys.argv[1:])
 
         collection = get_collection()
-        result = main(collection, user_question)
+        result = asyncio.run(main(collection, user_question))
 
         print("\nAnswer:", result.answer)
         print("\nSources:", result.sources)

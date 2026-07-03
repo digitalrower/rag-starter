@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -13,6 +15,12 @@ class QueryResponse(BaseModel):
     sources: list[str]
     chunks: list[Chunk]
     trace_id: str
+
+
+@dataclass
+class BatchResult:
+    successes: list[QueryResponse]
+    failures: list[tuple[str, BaseException]]
 
 
 class RatingsScore(BaseModel):  # faithfulness, relevance (1-5)
