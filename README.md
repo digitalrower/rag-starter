@@ -16,6 +16,7 @@ A production-ready RAG (Retrieval-Augmented Generation) pipeline that ingests do
 - Generates Claude-grounded answers using only retrieved context
 - Returns both the answer and source attribution (which documents were used)
 - Prevents hallucination by constraining Claude to say "I don't know" when context is insufficient
+- Processes many queries concurrently via an async batch dispatcher (bounded by a semaphore), for high-throughput workloads
 
 ---
 
@@ -233,6 +234,29 @@ For testing grounding, try:
 
 ---
 
+## Batch queries (async)
+
+For high-throughput workloads, the pipeline can process many queries concurrently instead of one at a time. `query.main` is async, and `query.main_batch` dispatches a list of questions through `asyncio.gather`, bounded by a semaphore so concurrency is capped (protecting against API rate limits and trace-export flooding). Each query still flows through the same typed `Chunk`/`QueryResponse` boundaries and still emits its own independent Langfuse trace; only the dispatch changed, not the data contract. Failures are isolated: `main_batch` returns a `BatchResult` splitting successful `QueryResponse` objects from failed `(question, exception)` pairs, so one bad query never sinks the batch.
+
+A sync wrapper (`query.main_sync`) preserves the one-query-at-a-time interface for callers that want it (the eval runner and experiment runner use it), so the async core does not force existing sync code to change.
+
+**Benchmark.** `scripts/benchmark_batch.py` runs the same dataset questions sequentially and concurrently against the same async pipeline, so the only variable is concurrency:
+
+    python -m scripts.benchmark_batch                      # default max_concurrency 5
+    python -m scripts.benchmark_batch --max-concurrency 10
+
+Measured on the 40-question eval dataset, through the full traced pipeline (retrieval + generation + Langfuse tracing intact):
+
+| | Time | Per query |
+|---|---|---|
+| Sequential (`await` each in a loop) | 91.13s | ~2.28s |
+| Parallel (`main_batch`, max_concurrency 5) | 17.15s | n/a |
+| **Speedup** | **5.31x** | |
+
+All 40 succeeded in both phases. The speedup is lower than a naive bare-API-call benchmark would show, and that is the honest number: concurrency is capped at 5 (not unbounded), retrieval is synchronous so only the generation step overlaps, and tracing overhead is paid on both sides. Raising `--max-concurrency` pushes the ratio higher at the cost of more simultaneous API and trace-export load.
+
+---
+
 ## Code quality
 
 Type checking and linting run automatically in CI on every push via GitHub Actions.
@@ -271,11 +295,11 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     ├── src/
     │   └── rag_starter/
     │       ├── __init__.py
-    │       ├── client.py         # Centralized Anthropic client factory (retries, timeouts)
+    │       ├── client.py         # Sync + async Anthropic client factories (retries, timeouts)
     │       ├── errors.py         # Typed RAGError hierarchy
-    │       ├── models.py         # Pydantic boundary models (Chunk, QueryResponse, RatingsScore, BinaryScore, ...)
+    │       ├── models.py         # Pydantic boundary models (Chunk, QueryResponse, ...) + BatchResult dataclass
     │       ├── ingest.py         # Load, chunk, embed, store
-    │       └── query.py          # Retrieve, generate, return grounded answer (Langfuse traced)
+    │       └── query.py          # Async retrieve/generate + main_sync wrapper + main_batch dispatcher (Langfuse traced)
     ├── evals/
     │   ├── dataset.json          # 40 golden Q/A pairs (happy_path, edge_case, adversarial, bias_paired)
     │   ├── scorer.py             # LLM-as-judge scoring logic
@@ -285,7 +309,8 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     │       ├── results.json      # Per-item eval output
     │       └── summary.json      # Per-category and overall averages
     ├── scripts/
-    │   └── seed_langfuse_dataset.py  # One-time seed of dataset.json into a Langfuse Dataset
+    │   ├── seed_langfuse_dataset.py  # One-time seed of dataset.json into a Langfuse Dataset
+    │   └── benchmark_batch.py        # Sequential vs async-batch benchmark (sequential/parallel timing)
     ├── assets/                   # README screenshots (Langfuse dashboard, latency)
     ├── tests/
     ├── data/                     # Source documents (markdown/text) 
@@ -375,6 +400,7 @@ Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answ
 - **Grounding constraints:** System prompt explicitly prevents hallucination by instructing Claude to say "I don't know" when context is insufficient.
 - **Modular functions:** Separate `retrieve_chunks()`, `build_prompt()`, and `generate_answer()` functions are importable for use in other projects (Streamlit demos, FastAPI services, eval harnesses).
 - **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), API and parse failures raise a typed `RAGError` hierarchy, and the eval runner isolates per-item failures so one bad item never corrupts a run. Details in `patterns-applied.md`.
+- **Async concurrency with bounded fan-out:** An `AsyncAnthropic` client and an `asyncio.gather`-based batch dispatcher process many queries at once, capped by a semaphore. Concurrent dispatch preserves independent per-query Langfuse traces (verified in the dashboard, not assumed), and `return_exceptions` plus a `BatchResult` split keep one failed query from sinking the batch. A sync wrapper keeps the async core from forcing existing sync callers to change.
 
 ---
 
@@ -433,6 +459,7 @@ Run the same query through `src/rag_starter/query.py` (with retrieval) and compa
 - **W6E (done):** Langfuse observability. Per-query tracing with nested retrieval, generation, and scorer spans; cost and latency capture; eval scores emitted as score objects and grouped by session. See the Observability section above.
 - **W7E (done):** Production codebase deep-dive (Anthropic Python SDK). Applied a centralized client factory, typed Pydantic boundaries, a typed error hierarchy, and structured-output judging for eval reliability. See `patterns-applied.md`.
 - **W7E (done):** Migrated the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI. Additive to the canonical local harness. See the Eval experiments section above.
+- **W8E (done):** Async batch processing. Converted the query path to async, added a semaphore-bounded `main_batch` dispatcher with isolated per-query failures, and benchmarked 5.31x throughput over sequential on the 40-question dataset. See the Batch queries section above.
 - **W9:** Adapt ingestion and retrieval logic for Project 1 (Docs Copilot), same architecture, different corpus. Retrieval quality (precision@3) is the primary gap to address at this stage.
 - **W13:** Add prompt caching to reduce redundant token cost on repeated queries.
 - **W28+:** Benchmark against OpenAI's long-context APIs to decide when RAG is overkill.
