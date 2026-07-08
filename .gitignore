@@ -47,3 +47,7 @@ chroma_db/
 
 # --- [PROJECT-SPECIFIC] Misc ---
 scripts/utilities/
+
+# provenance: learning artifact, 
+# relocated to ~/learning/rag-starter/rag-starter-W7E-SDK-patterns-applied.md
+patterns-applied.md
