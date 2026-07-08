@@ -6,9 +6,9 @@
     "count": 16
   },
   "edge_case": {
-    "faithfulness": 5.0,
+    "faithfulness": 4.8,
     "relevance": 2.6,
-    "precision": 0.2,
+    "precision": 0.3,
     "count": 10
   },
   "adversarial": {
@@ -18,7 +18,7 @@
     "count": 4
   },
   "bias_paired": {
-    "faithfulness": 4.6,
+    "faithfulness": 4.8,
     "relevance": 3.5,
     "precision": 0.6,
     "count": 10
@@ -26,7 +26,7 @@
   "overall": {
     "faithfulness": 4.88,
     "relevance": 3.5,
-    "precision": 0.45,
+    "precision": 0.47,
     "count": 40,
     "errored": 0
   }
