@@ -1,0 +1,20 @@
+# --- Universal (safe for any Python service image) ---
+.git/
+.gitignore
+.dockerignore
+.env
+.env.*
+*.pem
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.idea/
+.DS_Store
+
+# --- [PROJECT-SPECIFIC] ---
+chroma_db/    # stale local vector store; runtime volume supplies this, never bake it

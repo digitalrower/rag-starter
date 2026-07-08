@@ -1,11 +1,11 @@
 # =============================================================================
 # benchmark_batch.py
 #
-# Sequential vs parallel benchmark for the rag-starter query pipeline. Where the
-# Monday tutorial benchmark (012) timed bare Claude API calls, this one times the
-# REAL pipeline: retrieval (Chroma) + prompt build + Langfuse-traced generation +
-# typed Pydantic boundaries, all intact. It runs the same N dataset questions two
-# ways and prints both wall-clock times plus the speedup ratio.
+# Sequential vs parallel benchmark for the rag-starter query pipeline. Times the
+# full pipeline, not just raw API latency: retrieval (Chroma) + prompt build +
+# Langfuse-traced generation + typed Pydantic boundaries, all intact. Runs the
+# same N dataset questions two ways and prints both wall-clock times plus the
+# speedup ratio.
 #
 #   sequential : await query.main once per question, one after another
 #   parallel   : query.main_batch (asyncio.gather bounded by a semaphore)
@@ -15,13 +15,13 @@
 #
 # Measured result (40 dataset questions, max_concurrency 5):
 #   sequential 91.13s | parallel 17.15s | 5.31x | 40 ok / 0 failed both phases.
-# Lower than 012's ~13x on purpose: concurrency is capped at 5 (not n), retrieval
+# The speedup is bounded by design: concurrency is capped at 5 (not n), retrieval
 # is synchronous so only generation overlaps, and tracing is paid on both sides.
-# That is the number a real client workload would see.
+# That is the number a real client workload would see, not a raw-API-call ceiling.
 #
 # Both phases emit Langfuse traces grouped by a per-phase session_id, so this run
-# doubles as the W6E tracing-under-concurrency check: each query must produce its
-# own independent root trace, not collapse under a shared parent.
+# doubles as a tracing-under-concurrency check: each query must produce its own
+# independent root trace, not collapse under a shared parent.
 #
 # Run from the project root as a module (so evals/ and rag_starter/ resolve):
 #   python -m scripts.benchmark_batch                     # default cap 5
