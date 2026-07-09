@@ -1,0 +1,19 @@
+# Single service by design: rag-starter is a CLI task runner, not a server.
+# Chroma runs in-process (PersistentClient) and persists to a named volume,
+# so there is no separate datastore service to split out.
+
+services:
+  rag-starter:
+    build: .
+    volumes:
+      - rag_chroma:/app/chroma_db   # persistence boundary; survives across runs
+    env_file: .env                  # runtime secret injection (ANTHROPIC_API_KEY); nothing baked into the image
+
+    # No command here: the container inherits the image CMD (query with the demo question).
+    # Ingest is a one-time populate step, run explicitly against the fresh volume first:
+    #   docker compose run --rm rag-starter python -m rag_starter.ingest
+    # then run the default query:
+    #   docker compose run --rm rag-starter
+
+volumes:
+  rag_chroma:
