@@ -238,6 +238,12 @@ For testing grounding, try:
 
 The pipeline runs in a container with the embedding model and a demo corpus baked into the image. Chroma persists to a named volume, and the Anthropic API key is injected at runtime, never baked into the image.
 
+**Pull the published image** (skip the build if you just want to run it):
+
+    docker pull digitalrower/rag-starter:latest
+
+Then use `digitalrower/rag-starter:latest` in place of `rag-starter:latest` in the commands below, or build locally instead:
+
 **Build the image:**
 
     docker build -t rag-starter:latest .
