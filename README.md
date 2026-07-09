@@ -61,19 +61,19 @@ For production, measure against your actual usage patterns before committing to 
 - Embedding quality depends on the corpus. Retrieval is only as good as the embeddings. For domain-specific jargon (medical, legal, technical), consider fine-tuned or domain-specific embedding models in production.
 - Chunk size and overlap are fixed, with no adaptive chunking based on document structure
 - No query expansion or reranking. Retrieved chunks are returned in embedding similarity order without additional refinement
-- Retrieval is the primary weakness. Precision@3 scores 0.20 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the focus of improvement in W9–W12. See the eval results below for the full baseline.
+- Retrieval is the primary weakness. Precision@3 scores 0.20 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the primary area targeted for improvement. See the eval results below for the full baseline.
 - Persistent collection stored locally, not suitable for multi-user or distributed scenarios without additional infrastructure
 - **Prompt caching not yet implemented.** Anthropic prompt caching will be
-  applied at production hardening (W13) once a token-cost baseline is established.
+  applied in a later hardening pass once a token-cost baseline is established.
 
 
 ---
 
-## Eval results (W7E baseline)
+## Eval results (current baseline)
 
 Automated eval harness using LLM-as-judge scoring (Claude Haiku, temperature=0). 40 test cases across four categories. Full dataset: `evals/dataset.json`.
 
-As of W7E the three judges use Anthropic [structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) (constrained decoding via `messages.parse`), so the judge is guaranteed to return schema-valid JSON rather than free-text that has to be parsed. This replaced an earlier free-text-and-parse approach that intermittently failed when the judge prefaced its JSON with prose. See the note under Results.
+The three judges use Anthropic [structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) (constrained decoding via `messages.parse`), so the judge is guaranteed to return schema-valid JSON rather than free-text that has to be parsed. This replaced an earlier free-text-and-parse approach that intermittently failed when the judge prefaced its JSON with prose. See the note under Results.
 
 ### Metrics
 
@@ -93,11 +93,11 @@ As of W7E the three judges use Anthropic [structured outputs](https://docs.claud
 
 n = 40, 0 errored items.
 
-**On the instrument change.** These numbers are consistent with the earlier W5E free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. This run is the canonical baseline going forward. A scorer wiring bug found and fixed during re-baselining is documented in `patterns-applied.md`.
+**On the instrument change.** These numbers are consistent with an earlier free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. This run is the canonical baseline going forward. A scorer wiring bug found and fixed during re-baselining accounts for the earlier discrepancy.
 
 ### Interpretation
 
-The pattern that drove the W5E read still holds: the weakness is retrieval, not generation. Precision@3 drops to 0.20 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
+The earlier read showed the same pattern: the weakness is retrieval, not generation. Precision@3 drops to 0.20 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
 
 The adversarial category (precision@3=0.00, relevance=5.00) shows the grounding constraint working as intended: the four adversarial cases scored perfectly on relevance because the system correctly returned "I don't know based on the provided documentation" rather than inventing an answer when no chunks were retrieved.
 
@@ -109,7 +109,7 @@ The gap to close remains retrieval quality, not generation quality.
 
 ---
 
-## Observability (W6E)
+## Observability
 
 Every query and every eval run is traced end to end with [Langfuse](https://langfuse.com/). Instrumentation uses the Langfuse Python SDK (v4) context-manager pattern, so latency is timed automatically per span and cost is computed from the model name plus token usage passed on each generation.
 
@@ -143,7 +143,7 @@ Latency is captured per span at p50/p90/p95/p99, broken out by trace, generation
 
 Langfuse is open source and self-hostable, with a free Cloud tier that covers a project at this scale at no cost. Tracing, score emission, and dashboards all work the same whether running against Langfuse Cloud or a self-hosted instance, so the same instrumentation carries forward to later projects without rework.
 
-### Eval experiments (W7E)
+### Eval experiments
 
 The eval dataset is also mirrored into a Langfuse Dataset (`rag-starter-eval`), and `evals/experiment.py` runs the same RAG pipeline and the same three judges through Langfuse's experiment runner. Each run links every generation to its dataset item and attaches the three scores, so two runs can be compared item by item in the Experiments UI, with per-metric deltas highlighted.
 
@@ -234,6 +234,45 @@ For testing grounding, try:
 
 ---
 
+## Run with Docker
+
+The pipeline runs in a container with the embedding model and a demo corpus baked into the image. Chroma persists to a named volume, and the Anthropic API key is injected at runtime, never baked into the image.
+
+**Build the image:**
+
+    docker build -t rag-starter:latest .
+
+**Create the named volume** (persists the Chroma store across containers; one time):
+
+    docker volume create rag_chroma
+
+**Ingest first** (populates the volume; run once before querying):
+
+    docker run --rm \
+      -v rag_chroma:/app/chroma_db \
+      --env-file .env \
+      rag-starter:latest \
+      python -m rag_starter.ingest
+
+**Query** (the default command answers a demo question, reading the volume ingest wrote):
+
+    docker run --rm \
+      -v rag_chroma:/app/chroma_db \
+      --env-file .env \
+      rag-starter:latest
+
+**Query your own question:**
+
+    docker run --rm \
+      -v rag_chroma:/app/chroma_db \
+      --env-file .env \
+      rag-starter:latest \
+      python -m rag_starter.query "your question here"
+
+Querying before ingest fails with `Collection [anthropic_docs] does not exist`. That is expected; run the ingest step first.
+
+---
+
 ## Batch queries (async)
 
 For high-throughput workloads, the pipeline can process many queries concurrently instead of one at a time. `query.main` is async, and `query.main_batch` dispatches a list of questions through `asyncio.gather`, bounded by a semaphore so concurrency is capped (protecting against API rate limits and trace-export flooding). Each query still flows through the same typed `Chunk`/`QueryResponse` boundaries and still emits its own independent Langfuse trace; only the dispatch changed, not the data contract. Failures are isolated: `main_batch` returns a `BatchResult` splitting successful `QueryResponse` objects from failed `(question, exception)` pairs, so one bad query never sinks the batch.
@@ -320,7 +359,6 @@ Dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) bel
     ├── .gitignore
     ├── .python-version
     ├── requirements.txt
-    ├── patterns-applied.md       # Production patterns applied in W7E (sources, rationale, eval)
     └── README.md                 
 
 ---
@@ -399,7 +437,7 @@ Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answ
 - **Source attribution:** Every answer includes which documents the chunks came from, enabling verification and trust.
 - **Grounding constraints:** System prompt explicitly prevents hallucination by instructing Claude to say "I don't know" when context is insufficient.
 - **Modular functions:** Separate `retrieve_chunks()`, `build_prompt()`, and `generate_answer()` functions are importable for use in other projects (Streamlit demos, FastAPI services, eval harnesses).
-- **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), API and parse failures raise a typed `RAGError` hierarchy, and the eval runner isolates per-item failures so one bad item never corrupts a run. Details in `patterns-applied.md`.
+- **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), API and parse failures raise a typed `RAGError` hierarchy, and the eval runner isolates per-item failures so one bad item never corrupts a run.
 - **Async concurrency with bounded fan-out:** An `AsyncAnthropic` client and an `asyncio.gather`-based batch dispatcher process many queries at once, capped by a semaphore. Concurrent dispatch preserves independent per-query Langfuse traces (verified in the dashboard, not assumed), and `return_exceptions` plus a `BatchResult` split keep one failed query from sinking the batch. A sync wrapper keeps the async core from forcing existing sync callers to change.
 
 ---
@@ -454,15 +492,20 @@ Run the same query through `src/rag_starter/query.py` (with retrieval) and compa
 
 ---
 
-## Next steps
+## Roadmap
 
-- **W6E (done):** Langfuse observability. Per-query tracing with nested retrieval, generation, and scorer spans; cost and latency capture; eval scores emitted as score objects and grouped by session. See the Observability section above.
-- **W7E (done):** Production codebase deep-dive (Anthropic Python SDK). Applied a centralized client factory, typed Pydantic boundaries, a typed error hierarchy, and structured-output judging for eval reliability. See `patterns-applied.md`.
-- **W7E (done):** Migrated the eval harness to Langfuse Datasets and Experiments for run-over-run regression comparison in the UI. Additive to the canonical local harness. See the Eval experiments section above.
-- **W8E (done):** Async batch processing. Converted the query path to async, added a semaphore-bounded `main_batch` dispatcher with isolated per-query failures, and benchmarked 5.31x throughput over sequential on the 40-question dataset. See the Batch queries section above.
-- **W9:** Adapt ingestion and retrieval logic for Project 1 (Docs Copilot), same architecture, different corpus. Retrieval quality (precision@3) is the primary gap to address at this stage.
-- **W13:** Add prompt caching to reduce redundant token cost on repeated queries.
-- **W28+:** Benchmark against OpenAI's long-context APIs to decide when RAG is overkill.
+**Built so far:**
+
+- Langfuse observability: per-query tracing with nested retrieval, generation, and scorer spans; cost and latency capture; eval scores emitted as score objects and grouped by session. See the Observability section above.
+- Production hardening of the codebase (Anthropic Python SDK): a centralized client factory, typed Pydantic boundaries, a typed error hierarchy, and structured-output judging for eval reliability.
+- Optional Langfuse Datasets and Experiments path for run-over-run regression comparison in the UI, additive to the canonical local harness. See the Eval experiments section above.
+- Async batch processing: an async query path and a semaphore-bounded `main_batch` dispatcher with isolated per-query failures, benchmarked at 5.31x throughput over sequential on the 40-question dataset. See the Batch queries section above.
+
+**Planned:**
+
+- Improve retrieval quality (precision@3), the primary gap in the current baseline, including for new corpora on the same architecture.
+- Add prompt caching to reduce redundant token cost on repeated queries.
+- Benchmark against long-context APIs to decide when RAG is the right tradeoff.
 
 ---
 
