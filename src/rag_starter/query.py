@@ -74,10 +74,10 @@ async def generate_answer(prompt: str) -> str:
     ) as gen:
         client = get_async_anthropic_client()
 
-        # COST NOTE: Anthropic prompt caching (cache_control breakpoints) will be
-        # applied to this system prompt + retrieved context at W13 once we have
-        # a measurable token baseline. At W4 scale, caching adds complexity without
-        # a benchmark to justify it. See W13 hardening sprint.
+        # COST NOTE: Anthropic prompt caching (cache_control breakpoints) is not
+        # applied to this system prompt + retrieved context yet. At the current
+        # corpus scale, caching adds complexity without a measurable token baseline
+        # to justify it. Revisit once there is a baseline to measure against.
         try:
             message = await client.messages.create(
                 model=model_name,
