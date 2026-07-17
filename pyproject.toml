@@ -15,7 +15,7 @@ warn_return_any = true
 warn_unused_ignores = true
 no_implicit_optional = true
 strict_equality = true
-# Pragmatic baseline — not full strict mode. Tighten later if desired.
+# Pragmatic baseline, not full strict mode. Tighten later if desired.
 
 [tool.ruff]
 target-version = "py313"
@@ -31,3 +31,15 @@ select = ["E", "F", "I", "B", "UP"]
 "scripts/seed_langfuse_dataset.py" = ["E402"]
 "scripts/benchmark_batch.py" = ["E402"]
 "scripts/utilities/**/*.py" = ["E402", "F841", "E501"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "mypy==2.1.0",
+    "ruff==0.15.14",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]

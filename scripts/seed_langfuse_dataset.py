@@ -24,7 +24,7 @@ DATASET_PATH = Path(__file__).parent.parent / "evals" / "dataset.json"
 
 # Inlined rather than imported from evals.runner: importing runner drags in
 # chromadb/scorer/query and fires runner's module-level load_dotenv, all for
-# three lines. Deviation from diagram d3 noted in the week file.
+# three lines.
 def load_dataset(path: Path) -> list[EvalItem]:
     adapter = TypeAdapter(list[EvalItem])
     return adapter.validate_json(path.read_bytes())
@@ -40,7 +40,7 @@ def seed() -> None:
         # id=item.id is the upsert key: re-running this script overwrites
         # existing items instead of duplicating them (verified empirically,
         # second run kept the count at the same number).
-        # Field mapping (locked in the W7E Friday design):
+        # Field mapping:
         #   question -> input (raw string; experiment.py task reads item.input)
         #   expected_answer -> expected_output (evaluators receive it)
         #   everything else -> metadata (None values pass through as-is)
