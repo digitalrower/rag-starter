@@ -48,9 +48,7 @@ async def test_batch_returns_n_responses(
     # get_async_anthropic_client is called inside generate_answer for every query,
     # so every concurrent call in the batch receives the same fake client.
     with patch(CLIENT_FACTORY, return_value=mock_async_client):
-        result = await query.main_batch(
-            seeded_collection, questions, max_concurrency=2
-        )
+        result = await query.main_batch(seeded_collection, questions, max_concurrency=2)
 
     # Contract: every question produced a success, nothing errored.
     assert len(result.successes) == len(questions)

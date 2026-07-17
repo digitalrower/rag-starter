@@ -122,7 +122,5 @@ def stub_langfuse_trace() -> object:
     # patch is the get_current_trace_id method on that module-level object. A
     # stable fake id lets main() proceed through its real control flow with
     # tracing reduced to a no-op.
-    with patch.object(
-        query.langfuse, "get_current_trace_id", return_value="test-trace-id"
-    ):
+    with patch.object(query.langfuse, "get_current_trace_id", return_value="test-trace-id"):
         yield
