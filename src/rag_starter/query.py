@@ -113,6 +113,8 @@ async def generate_answer(prompt: str) -> str:
             logger.error(f"Anthropic API call failed: {error_msg}")
             gen.update(level="ERROR", status_message=error_msg)
             raise GenerationError(error_msg) from e
+        finally:
+            await client.close()
 
 
 async def main(

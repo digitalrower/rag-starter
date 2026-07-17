@@ -18,11 +18,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mypy ruff
-          pip install -e .
+          pip install -e ".[dev]"
       - name: Run ruff lint
-        run: ruff check src/ evals/ scripts/
+        run: ruff check src/ evals/ scripts/ tests/
       - name: Run ruff format check
-        run: ruff format --check src/ evals/ scripts/
+        run: ruff format --check src/ evals/ scripts/ tests/
       - name: Run mypy
         run: mypy src/ evals/ scripts/
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e ".[dev]"
+      - name: Run pytest
+        run: pytest -v
