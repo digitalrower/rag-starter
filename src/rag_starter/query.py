@@ -172,6 +172,12 @@ async def main_batch(
     tags: list[str] | None = None,
     max_concurrency: int = 5,
 ) -> BatchResult:
+    
+    # Semaphore(0) is legal and starts with zero permits, so every task blocks on
+    # a release that never comes: a silent hang, not an error. Guard here rather
+    # than only at the CLI, since this is the layer that builds the semaphore.
+    if max_concurrency < 1:
+        raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
 
     semaphore = asyncio.Semaphore(max_concurrency)
 
