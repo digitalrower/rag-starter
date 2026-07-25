@@ -26,7 +26,7 @@ A user query flows through four stages:
 
 **Document ingestion and chunking:** Raw markdown files are loaded from `./data/`, split into fixed-size chunks (default: 1,500 characters with 200-character overlap, sliding-window), and prepared for embedding. Chunking strategy balances retrieval granularity (smaller chunks = more precise results) against context preservation (larger chunks = more surrounding context per result).
 
-**Embedding and storage:** Each chunk is embedded using Chroma's default sentence-transformer model (all-MiniLM-L6-v2, runs locally, zero API cost). Embeddings are stored in a persistent Chroma collection at `./chroma_db/` alongside metadata (source file, chunk index). The persistent collection survives between runs and can be queried without re-ingesting.
+**Embedding and storage:** Each chunk is embedded using Chroma's default embedding function (all-MiniLM-L6-v2, run as an ONNX model on onnxruntime, locally, zero API cost). Embeddings are stored in a persistent Chroma collection at `./chroma_db/` alongside metadata (source file, chunk index). The persistent collection survives between runs and can be queried without re-ingesting.
 
 **Retrieval:** When a user asks a question, the question is embedded using the same model and used as a query vector against the stored embeddings. Chroma returns the top-K most similar chunks (default: 3) ranked by cosine similarity. This semantic search retrieves relevant context even if keywords don't match exactly.
 
@@ -275,13 +275,13 @@ Then use `digitalrower/rag-starter:latest` in place of `rag-starter:latest` in t
       rag-starter:latest \
       python -m rag_starter.query "your question here"
 
-Querying before ingest fails with `Collection [anthropic_docs] does not exist`. That is expected; run the ingest step first.
+Querying before ingest fails with `Collection [anthropic_docs] does not exist`. That is expected; run the ingest step first. A collection that exists but holds no chunks raises `RetrievalError` naming the empty collection, which is the same fix.
 
 ---
 
 ## Batch queries (async)
 
-For high-throughput workloads, the pipeline can process many queries concurrently instead of one at a time. `query.main` is async, and `query.main_batch` dispatches a list of questions through `asyncio.gather`, bounded by a semaphore so concurrency is capped (protecting against API rate limits and trace-export flooding). Each query still flows through the same typed `Chunk`/`QueryResponse` boundaries and still emits its own independent Langfuse trace; only the dispatch changed, not the data contract. Failures are isolated by class. `main_batch` returns a `BatchResult` splitting successful `QueryResponse` objects from failed `(question, exception)` pairs, and a `RAGError` (a retrieval or generation failure on a single question) is counted there rather than stopping the run, so one bad query never sinks the batch. Anything else is treated as a bug rather than a bad question: the batch lets every task settle, then raises a `BaseExceptionGroup` carrying the unexpected exceptions, so a systematic failure surfaces as a crash instead of an inflated failure count. Cancellation propagates immediately and unwrapped, so `asyncio.timeout` and `TaskGroup` still recognize it as cancellation. `max_concurrency` must be at least 1; lower values raise `ValueError` rather than deadlocking on a semaphore with no permits.
+For high-throughput workloads, the pipeline can process many queries concurrently instead of one at a time. `query.main` is async, and `query.main_batch` dispatches a list of questions through `asyncio.gather`, bounded by a semaphore so concurrency is capped (protecting against API rate limits and trace-export flooding). Each query still flows through the same typed `Chunk`/`QueryResponse` boundaries and still emits its own independent Langfuse trace; only the dispatch changed, not the data contract. Failures are isolated by class. `main_batch` returns a `BatchResult` splitting successful `QueryResponse` objects from failed `(question, exception)` pairs, and a `RAGError` (a retrieval or generation failure on a single question) is counted there rather than stopping the run, so one bad query never sinks the batch. Anything else is treated as a bug rather than a bad question: the batch lets every task settle, then raises a `BaseExceptionGroup` carrying the unexpected exceptions. Raising discards the responses already produced, so a caller cannot recover partial results from the group; that tradeoff is deliberate, since a systematic failure should surface as a crash rather than an inflated failure count. Cancellation is never wrapped: cancelling the awaiting task propagates out of `gather` directly, and a cancelled child task is re-raised unchanged once the remaining tasks settle. `max_concurrency` must be at least 1, validated on both the CLI flag and the function argument, because `asyncio.Semaphore(0)` is legal and blocks forever rather than failing.
 
 A sync wrapper (`query.main_sync`) preserves the one-query-at-a-time interface for callers that want it (the eval runner and experiment runner use it), so the async core does not force existing sync code to change.
 
@@ -299,6 +299,8 @@ Measured on the 40-question eval dataset, through the full traced pipeline (retr
 | **Speedup** | **5.31x** | |
 
 All 40 succeeded in both phases. The speedup is lower than a naive bare-API-call benchmark would show, and that is the honest number: concurrency is capped at 5 (not unbounded), retrieval is synchronous so only the generation step overlaps, and tracing overhead is paid on both sides. Raising `--max-concurrency` pushes the ratio higher at the cost of more simultaneous API and trace-export load.
+
+A ratio is only printed when both phases completed the same number of successful queries. If a phase produced no successes, or the two phases succeeded on different subsets, the speedup line says so instead of showing a number, and the script exits nonzero. A ratio measured over queries that failed before reaching the API would look plausible and mean nothing, and it is the figure most likely to be quoted, so an automated caller can check the exit status rather than parsing output.
 
 ---
 
@@ -404,7 +406,7 @@ Edit these parameters in `src/rag_starter/query.py` to tune retrieval behavior:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `n_results` | 3 | Retrieved chunk count per query. Start at 3, increase if Claude needs more context. |
+| `n_results` | 3 | Retrieved chunk count per query. Start at 3, increase if Claude needs more context. Must be 1 or greater. |
 | `max_tokens` | 500 | Max response length. Increase if answers are truncated; decrease to reduce cost. |
 
 ---
@@ -456,13 +458,13 @@ Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answ
 
 ## Implementation highlights
 
-- **Local embeddings:** Uses Chroma's default embedding function (sentence-transformers all-MiniLM-L6-v2), which runs locally with zero API cost. Swappable in production for OpenAI, Voyage, or other providers.
+- **Local embeddings:** Uses Chroma's default embedding function (all-MiniLM-L6-v2 as an ONNX model on onnxruntime), which runs locally with zero API cost. The model is fetched once into a local cache on first use, then reused. Swappable in production for OpenAI, Voyage, or other providers.
 - **Persistent storage:** Chroma collection persists to disk, allowing multiple queries without re-ingestion.
 - **Source attribution:** Every answer includes which documents the chunks came from, enabling verification and trust.
 - **Grounding constraints:** System prompt explicitly prevents hallucination by instructing Claude to say "I don't know" when context is insufficient.
 - **Modular functions:** Separate `retrieve_chunks()`, `build_prompt()`, and `generate_answer()` functions are importable for use in other projects (Streamlit demos, FastAPI services, eval harnesses).
-- **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), API and parse failures raise a typed `RAGError` hierarchy, and the eval runner isolates per-item failures so one bad item never corrupts a run.
-- **Async concurrency with bounded fan-out:** An `AsyncAnthropic` client and an `asyncio.gather`-based batch dispatcher process many queries at once, capped by a semaphore. Concurrent dispatch preserves independent per-query Langfuse traces (verified in the dashboard, not assumed), and `return_exceptions` plus a `BatchResult` split keep one failed query from sinking the batch. Each per-call client is closed explicitly inside its owning event loop, so repeated runs produce no connection-pool teardown noise. A sync wrapper keeps the async core from forcing existing sync callers to change.
+- **Typed boundaries and error handling:** Layer boundaries use validated Pydantic v2 models (`extra="forbid"`), retrieval, API, and parse failures raise a typed `RAGError` hierarchy that separates operational failures from bugs, and the eval runner isolates per-item failures so one bad item never corrupts a run.
+- **Async concurrency with bounded fan-out:** An `AsyncAnthropic` client and an `asyncio.gather`-based batch dispatcher process many queries at once, capped by a semaphore. Concurrent dispatch preserves independent per-query Langfuse traces (verified in the dashboard, not assumed), and `return_exceptions` plus a `BatchResult` split keep one failed query from sinking the batch, while anything outside the expected error hierarchy raises rather than inflating the failure count. Each per-call client is closed explicitly inside its owning event loop, so repeated runs produce no connection-pool teardown noise. A sync wrapper keeps the async core from forcing existing sync callers to change.
 
 ---
 
@@ -473,10 +475,16 @@ Common issues and solutions:
 | Error | Cause | Solution |
 |-------|-------|----------|
 | `Collection not found` | `ingest.py` hasn't been run yet | Run `python -m rag_starter.ingest` first |
+| `RetrievalError: collection ... is empty` | Collection exists but holds no chunks, usually a fresh volume or a wiped store | Run `python -m rag_starter.ingest` against the same store |
+| `RetrievalError: <ExceptionClass>: ...` | The vector store or the embedding model failed. The wrapped class names the cause: an `httpx` error means the embedding model could not be downloaded on a cold cache, a `ChromaError` means the store itself failed | Check network access on first run, then disk space and the `chroma_db/` path |
+| `ValueError: n_results must be >= 1` | `retrieve_chunks` called with a non-positive chunk count | Pass 1 or more |
+| `ValueError: max_concurrency must be >= 1` | `main_batch` or `--max-concurrency` given a non-positive cap | Pass 1 or more. Zero would build a semaphore with no permits and block forever |
 | `ANTHROPIC_API_KEY not set` | Missing `.env` file or key | Copy `.env.example` to `.env` and add your key |
 | `AuthenticationError` | Invalid API key | Verify key at console.anthropic.com |
 | `RateLimitError` | Too many requests to Claude | Wait a moment and retry |
-| Empty retrieval results | No chunks match the query | Try a different query or check corpus relevance |
+| No chunks matched, logged as a warning | The query matched nothing in a populated collection | Not an error. Try a different query or check corpus relevance |
+
+Retrieval failures raise `RetrievalError`, a subclass of `RAGError`, which means a batch counts them as failed questions and continues rather than aborting. The wrapped exception is preserved as `__cause__`, so the traceback shows the underlying cause alongside the wrapper.
 
 ---
 
@@ -484,7 +492,7 @@ Common issues and solutions:
 
 - [Chroma](https://docs.trychroma.com/): Vector database (local persistence)
 - [Anthropic Python SDK](https://github.com/anthropics/anthropic-sdk-python): Claude API client
-- [sentence-transformers](https://www.sbert.net/): Embedding model (runs locally via Chroma)
+- [onnxruntime](https://onnxruntime.ai/): Runs the default all-MiniLM-L6-v2 embedding model locally (pulled in by Chroma)
 - [Pydantic](https://docs.pydantic.dev/): Validated models at every layer boundary
 - [Langfuse](https://langfuse.com/): Tracing, cost/latency capture, and eval score tracking
 - [python-dotenv](https://github.com/theskumar/python-dotenv): Environment variable management
@@ -525,6 +533,7 @@ Run the same query through `src/rag_starter/query.py` (with retrieval) and compa
 - Optional Langfuse Datasets and Experiments path for run-over-run regression comparison in the UI, additive to the canonical local harness. See the Eval experiments section above.
 - Async batch processing: an async query path and a semaphore-bounded `main_batch` dispatcher with isolated per-query failures, benchmarked at 5.31x throughput over sequential on the 40-question dataset. See the Batch queries section above.
 - Test suite and CI: pytest coverage of the async dispatcher contract and the client lifecycle, with mypy, ruff, and pytest all gating merges to `main`. See the Code quality section above.
+- Error-boundary hardening: retrieval failures are wrapped as typed errors regardless of which library raises them, argument validation sits at the layer that owns each invariant, cancellation is never swallowed, and the benchmark refuses to report a speedup it cannot stand behind.
 
 **Planned:**
 
