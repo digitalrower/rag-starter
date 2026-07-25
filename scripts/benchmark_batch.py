@@ -76,10 +76,9 @@ async def run_sequential(
             await query.main(collection, q, session_id=session_id, tags=["benchmark", "sequential"])
             successes += 1
         except RAGError:
-            # Match the batch path's partial-failure tolerance: one bad question
-            # is counted, not fatal, so both phases behave the same under failure.
+            # Match the batch path: one bad question is counted, not fatal.
             failures += 1
-            logger.error(f"Run sequential question {q} failed")
+            logger.error(f"Sequential query failed: {q}", exc_info=True)
 
     elapsed = time.perf_counter() - start
     return elapsed, successes, failures
@@ -108,7 +107,8 @@ async def run_benchmark(
     collection: Collection,
     questions: list[str],
     max_concurrency: int,
-) -> None:
+) -> bool:
+    """Return True only if the printed speedup is a trustworthy measurement."""
     # Distinct session ids per phase so the Langfuse dashboard shows two separate
     # trace groups (bench-seq-* and bench-par-*) that can be compared directly.
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -123,16 +123,26 @@ async def run_benchmark(
         collection, questions, par_session, max_concurrency
     )
 
-    # Guard against divide-by-zero if the parallel phase somehow reports ~0s.
-    ratio = seq_time / par_time if par_time > 0 else float("inf")
+    # A ratio over a run where nothing succeeded is meaningless, and a ratio over
+    # two phases with different success counts compares unlike workloads. Both
+    # print a qualified line rather than a bare number, because the headline
+    # figure is what gets quoted and it must not look valid when it is not.
+    trustworthy = False
+    if seq_ok == 0 or par_ok == 0:
+        speedup = "n/a (a phase completed no successful queries)"
+    elif seq_ok != par_ok:
+        speedup = f"{seq_time / par_time:.2f}x  UNRELIABLE: {seq_ok} vs {par_ok} successful queries"
+    else:
+        speedup = f"{seq_time / par_time:.2f}x"
+        trustworthy = True
 
-    # max_concurrency is printed because the ratio is meaningless without it:
-    # "5.31x" only means something paired with the cap it was measured at.
     print(f"n queries: {len(questions)}")
     print(f"sequential: {seq_time:.2f}s ({seq_ok} ok, {seq_fail} failed)")
     print(f"parallel: {par_time:.2f}s ({par_ok} ok, {par_fail} failed)")
-    print(f"speedup: {ratio:.2f}x")
+    print(f"speedup: {speedup}")
     print(f"max_concurrency: {max_concurrency}")
+
+    return trustworthy
 
 
 def positive_int(raw: str) -> int:
@@ -172,9 +182,15 @@ if __name__ == "__main__":
     collection = query.get_collection()
 
     try:
-        asyncio.run(run_benchmark(collection, questions, max_concurrency=args.max_concurrency))
-
+        trustworthy = asyncio.run(
+            run_benchmark(collection, questions, max_concurrency=args.max_concurrency)
+        )
     finally:
         # Must be last: trace exports run in the background, and without an explicit
         # flush the script can exit before they land, silently losing traces.
         langfuse.flush()
+
+    # Exit nonzero when the number is not a valid measurement, so a scripted caller
+    # can tell a clean run from a broken one without parsing stdout.
+    if not trustworthy:
+        sys.exit("benchmark did not produce a valid measurement, see counts above")
