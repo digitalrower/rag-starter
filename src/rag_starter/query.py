@@ -7,10 +7,11 @@ import chromadb
 from anthropic import APIError
 from anthropic.types import TextBlock
 from chromadb import Collection
+from chromadb.errors import ChromaError
 from langfuse import get_client, propagate_attributes
 
 from rag_starter.client import get_async_anthropic_client
-from rag_starter.errors import GenerationError, RAGError
+from rag_starter.errors import GenerationError, RAGError, RetrievalError
 from rag_starter.models import BatchResult, Chunk, QueryResponse
 
 # from dotenv import load_dotenv
@@ -32,7 +33,19 @@ def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[
     with langfuse.start_as_current_observation(
         as_type="span", name="retrieval", input={"query": q, "n_results": n_results}
     ) as span:
-        results = collection.query(query_texts=[q], n_results=n_results)
+        try:
+            results = collection.query(query_texts=[q], n_results=n_results)
+        except ChromaError as e:
+            # ChromaError is the base for every chromadb exception. Wrapping as
+            # RAGError-family makes a vector-store failure a counted failure the
+            # batch tolerates, rather than a bug that aborts the whole run.
+            error_msg = f"Retrieval failed: {e}"
+            logger.error(error_msg)
+            span.update(level="ERROR", status_message=error_msg)
+            raise RetrievalError(error_msg) from e
+
+        # Outside the try on purpose: a results dict with an unexpected shape is a
+        # contract violation, not an operational failure, and should crash loudly.
         docs = cast(list[list[str]], results["documents"])[0]
         metas = cast(list[list[dict[str, str]]], results["metadatas"])[0]
 
@@ -40,12 +53,8 @@ def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[
         for doc, meta in zip(docs, metas, strict=False):
             chunks.append(Chunk(text=doc, source=meta.get("source", "unknown")))
 
-        # langfuse: return output and end the span
         span.update(output=chunks)
-
-        # log: info when retrieval completes (chunks found)
         logger.info(f"Retrieval complete: found {len(chunks)} chunks.")
-
         return chunks
 
 
