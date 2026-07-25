@@ -134,6 +134,14 @@ async def run_benchmark(
     print(f"max_concurrency: {max_concurrency}")
 
 
+def positive_int(raw: str) -> int:
+    # Cast arg to int and ensure it is >= 1.
+    value = int(raw)  
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {value}")
+    return value
+
+
 if __name__ == "__main__":
     configure_logging()
 
@@ -143,7 +151,7 @@ if __name__ == "__main__":
     # semaphore, which requires an int).
     parser.add_argument(
         "--max-concurrency",
-        type=int,
+        type=positive_int,
         default=5,
         help="Run at most N queries concurrently",
     )
