@@ -127,6 +127,10 @@ async def run_benchmark(
     # two phases with different success counts compares unlike workloads. Both
     # print a qualified line rather than a bare number, because the headline
     # figure is what gets quoted and it must not look valid when it is not.
+    # Equal counts is a proxy for equal workloads, not a proof of it: under
+    # intermittent failures each phase could fail a different subset of the same
+    # size. Comparing the failed question sets would be exact and needs the
+    # sequential phase to collect them, which it currently does not.
     trustworthy = False
     if seq_ok == 0 or par_ok == 0:
         speedup = "n/a (a phase completed no successful queries)"

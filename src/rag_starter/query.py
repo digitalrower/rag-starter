@@ -60,6 +60,9 @@ def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[
             # Empty results mean either an unseeded collection or a query that
             # legitimately matched nothing. count() separates them, and only the
             # first is a failure. The extra roundtrip runs only on this rare path.
+            # count() is deliberately outside the try above: it can only run after
+            # query() already succeeded against the same store, so wrapping it would
+            # guard a window of microseconds.
             if collection.count() == 0:
                 error_msg = f"Retrieval failed: collection '{collection.name}' is empty"
                 logger.error(error_msg)
