@@ -333,6 +333,7 @@ The suite targets the concurrency-sensitive parts of the pipeline, where correct
 
 - **Async dispatcher contract:** `main_batch` returns one valid `QueryResponse` per input question, order preserved, with no dropped or duplicated results. The Anthropic client is mocked and retrieval runs against a small in-memory Chroma collection, so the test is fast and hits no network.
 - **Client lifecycle:** the per-call `AsyncAnthropic` client is closed explicitly inside the event loop that owns it, rather than left to garbage collection after the loop closes. This guards against the connection-pool teardown that otherwise surfaces as `RuntimeError: Event loop is closed` on repeated runs.
+- **Error boundary:** a `RAGError` is counted as a failed question and the batch continues; anything outside that hierarchy aborts the batch rather than inflating the failure count. The argument guards on `max_concurrency` and `n_results` are covered too, since both prevent failures that would otherwise be silent rather than loud.
 
 Run them with `pytest -v`.
 
