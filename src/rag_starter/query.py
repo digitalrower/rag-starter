@@ -263,17 +263,19 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         stream=sys.stdout,
     )
+
     if len(sys.argv) > 1:
         user_question = " ".join(sys.argv[1:])
-
         collection = get_collection()
-        result = asyncio.run(main(collection, user_question))
 
-        print("\nAnswer:", result.answer)
-        print("\nSources:", result.sources)
-
-        # langfuse: ensure all background events are sent before script exists
-        langfuse.flush()
-
+        try:
+            result = asyncio.run(main(collection, user_question))
+            print("\nAnswer:", result.answer)
+            print("\nSources:", result.sources)
+        finally:
+            # Trace export runs in the background. Without this the process can exit
+            # before a failed run's ERROR-level span is sent, losing the one trace
+            # that mattered.
+            langfuse.flush()
     else:
         print("Error: No string provided.")
