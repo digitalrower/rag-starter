@@ -10,7 +10,7 @@ from chromadb import Collection
 from langfuse import get_client, propagate_attributes
 
 from rag_starter.client import get_async_anthropic_client
-from rag_starter.errors import GenerationError
+from rag_starter.errors import GenerationError, RAGError
 from rag_starter.models import BatchResult, Chunk, QueryResponse
 
 # from dotenv import load_dotenv
@@ -181,20 +181,40 @@ async def main_batch(
 
     coroutines = [run_one(q) for q in questions]
 
+    # return_exceptions=True keeps one bad question from cancelling its siblings.
+    # Cost: gather captures bugs too, so the partition below sorts them back apart.
     results = await asyncio.gather(*coroutines, return_exceptions=True)
 
     successes: list[QueryResponse] = []
     failures: list[tuple[str, BaseException]] = []
+    unexpected: list[BaseException] = []
 
     for question, outcome in zip(questions, results, strict=True):
-        if isinstance(outcome, BaseException):
+        # RAGError first: it is itself a BaseException, so the broad check would
+        # otherwise swallow it. RAGError is what the single-query path tolerates,
+        # so it is the only class tolerated here; the two must agree or their
+        # results are not comparable.
+        if isinstance(outcome, RAGError):
             failures.append((question, outcome))
             logger.error(f"Batch run failed: {question}: {outcome}")
+        # BaseException, not Exception: CancelledError inherits from BaseException
+        # and would fall through to the success branch as a completed answer.
+        elif isinstance(outcome, BaseException):
+            unexpected.append(outcome)
+            logger.error(f"Unexpected exception for {question}", exc_info=outcome)
         else:
             successes.append(outcome)
 
-    return BatchResult(successes=successes, failures=failures)
+    if unexpected:
+        # Raise rather than return a partial result: a bug hitting every query
+        # would otherwise read as "N failures" to the caller.
+        # BaseExceptionGroup, not ExceptionGroup: the latter raises TypeError on
+        # members that are BaseException but not Exception.
+        raise BaseExceptionGroup(
+            f"{len(unexpected)} unexpected exception(s) during batch run", unexpected
+        )
 
+    return BatchResult(successes=successes, failures=failures)
 
 if __name__ == "__main__":
     logging.basicConfig(
