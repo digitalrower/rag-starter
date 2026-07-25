@@ -137,7 +137,7 @@ async def run_benchmark(
 
 def positive_int(raw: str) -> int:
     # Cast arg to int and ensure it is >= 1.
-    value = int(raw)  
+    value = int(raw)
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be >= 1, got {value}")
     return value

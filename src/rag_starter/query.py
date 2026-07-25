@@ -216,6 +216,7 @@ async def main_batch(
 
     return BatchResult(successes=successes, failures=failures)
 
+
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
