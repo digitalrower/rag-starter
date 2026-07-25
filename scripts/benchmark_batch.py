@@ -31,6 +31,7 @@
 import argparse
 import asyncio
 import logging
+import sys
 import time
 from datetime import UTC, datetime
 
@@ -164,6 +165,9 @@ if __name__ == "__main__":
     # Extract just the question strings; both phases take a plain list[str].
     questions = [item.question for item in dataset]
     # questions = questions[:5]  # smoke-test slice: uncomment to prototype cheaply
+
+    if not questions:
+        sys.exit(f"no questions loaded from {DATASET_PATH}; nothing to benchmark")
 
     collection = query.get_collection()
     asyncio.run(run_benchmark(collection, questions, max_concurrency=args.max_concurrency))
