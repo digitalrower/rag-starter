@@ -170,8 +170,11 @@ if __name__ == "__main__":
         sys.exit(f"no questions loaded from {DATASET_PATH}; nothing to benchmark")
 
     collection = query.get_collection()
-    asyncio.run(run_benchmark(collection, questions, max_concurrency=args.max_concurrency))
 
-    # Must be last: trace exports run in the background, and without an explicit
-    # flush the script can exit before they land, silently losing traces.
-    langfuse.flush()
+    try:
+        asyncio.run(run_benchmark(collection, questions, max_concurrency=args.max_concurrency))
+
+    finally:
+        # Must be last: trace exports run in the background, and without an explicit
+        # flush the script can exit before they land, silently losing traces.
+        langfuse.flush()
