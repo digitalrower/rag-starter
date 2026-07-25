@@ -172,7 +172,7 @@ async def main_batch(
     tags: list[str] | None = None,
     max_concurrency: int = 5,
 ) -> BatchResult:
-    
+
     # Semaphore(0) is legal and starts with zero permits, so every task blocks on
     # a release that never comes: a silent hang, not an error. Guard here rather
     # than only at the CLI, since this is the layer that builds the semaphore.
@@ -196,15 +196,17 @@ async def main_batch(
     unexpected: list[BaseException] = []
 
     for question, outcome in zip(questions, results, strict=True):
-        # RAGError first: it is itself a BaseException, so the broad check would
-        # otherwise swallow it. RAGError is what the single-query path tolerates,
-        # so it is the only class tolerated here; the two must agree or their
-        # results are not comparable.
+        # Cancellation is neither a failure nor a bug, and must propagate bare and
+        # immediately. Wrapped in a group it stops reading as cancellation, so
+        # asyncio.timeout never converts it and TaskGroup treats it as a crash.
+        if isinstance(outcome, asyncio.CancelledError):
+            raise outcome
+
+        # RAGError before the broad check: it is itself a BaseException, so this
+        # order decides whether a bad question is counted or crashes the batch.
         if isinstance(outcome, RAGError):
             failures.append((question, outcome))
             logger.error(f"Batch run failed: {question}: {outcome}")
-        # BaseException, not Exception: CancelledError inherits from BaseException
-        # and would fall through to the success branch as a completed answer.
         elif isinstance(outcome, BaseException):
             unexpected.append(outcome)
             logger.error(f"Unexpected exception for {question}", exc_info=outcome)
