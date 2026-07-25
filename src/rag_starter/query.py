@@ -7,7 +7,6 @@ import chromadb
 from anthropic import APIError
 from anthropic.types import TextBlock
 from chromadb import Collection
-from chromadb.errors import ChromaError
 from langfuse import get_client, propagate_attributes
 
 from rag_starter.client import get_async_anthropic_client
@@ -30,28 +29,52 @@ def get_collection() -> Collection:
 
 
 def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[Chunk]:
+    # Chroma raises a bare TypeError from inside its validation layer for n_results
+    # below 1. Guard here so the message names the argument, and so the except
+    # clause below only ever sees operational failures, not caller mistakes.
+    if n_results < 1:
+        raise ValueError(f"n_results must be >= 1, got {n_results}")
+
     with langfuse.start_as_current_observation(
         as_type="span", name="retrieval", input={"query": q, "n_results": n_results}
     ) as span:
         try:
             results = collection.query(query_texts=[q], n_results=n_results)
-        except ChromaError as e:
-            # ChromaError is the base for every chromadb exception. Wrapping as
-            # RAGError-family makes a vector-store failure a counted failure the
-            # batch tolerates, rather than a bug that aborts the whole run.
-            error_msg = f"Retrieval failed: {e}"
+        except Exception as e:
+            # Broad on purpose. The embedding function runs inside query(), so a
+            # model-download or onnxruntime failure is not a ChromaError. Arguments
+            # are validated above, so anything reaching here is a failure of the
+            # retrieval subsystem whichever library raised it. Exception, not
+            # BaseException: cancellation and KeyboardInterrupt must pass through.
+            error_msg = f"Retrieval failed: {type(e).__name__}: {e}"
             logger.error(error_msg)
             span.update(level="ERROR", status_message=error_msg)
             raise RetrievalError(error_msg) from e
 
-        # Outside the try on purpose: a results dict with an unexpected shape is a
-        # contract violation, not an operational failure, and should crash loudly.
+        # Outside the try: an unexpected results shape is a contract violation,
+        # not an operational failure, and should crash rather than be counted.
         docs = cast(list[list[str]], results["documents"])[0]
-        metas = cast(list[list[dict[str, str]]], results["metadatas"])[0]
+        metas = cast(list[list[dict[str, str] | None]], results["metadatas"])[0]
+
+        if not docs:
+            # Empty results mean either an unseeded collection or a query that
+            # legitimately matched nothing. count() separates them, and only the
+            # first is a failure. The extra roundtrip runs only on this rare path.
+            if collection.count() == 0:
+                error_msg = f"Retrieval failed: collection '{collection.name}' is empty"
+                logger.error(error_msg)
+                span.update(level="ERROR", status_message=error_msg)
+                raise RetrievalError(error_msg)
+            logger.warning(f"No chunks matched query: '{q}'")
 
         chunks = []
-        for doc, meta in zip(docs, metas, strict=False):
-            chunks.append(Chunk(text=doc, source=meta.get("source", "unknown")))
+        # strict=True: chroma returns documents and metadatas of equal length, so a
+        # mismatch is the contract violation the casts above assume away. Silent
+        # truncation would drop chunks and degrade grounding with nothing logged.
+        for doc, meta in zip(docs, metas, strict=True):
+            # A record stored without metadata comes back as None, not {}.
+            source = meta.get("source", "unknown") if meta else "unknown"
+            chunks.append(Chunk(text=doc, source=source))
 
         span.update(output=chunks)
         logger.info(f"Retrieval complete: found {len(chunks)} chunks.")
