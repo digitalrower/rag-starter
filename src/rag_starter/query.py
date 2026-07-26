@@ -10,7 +10,7 @@ from chromadb import Collection
 from langfuse import get_client, propagate_attributes
 
 from rag_starter.client import get_async_anthropic_client
-from rag_starter.errors import GenerationError
+from rag_starter.errors import GenerationError, RAGError, RetrievalError
 from rag_starter.models import BatchResult, Chunk, QueryResponse
 
 # from dotenv import load_dotenv
@@ -29,23 +29,58 @@ def get_collection() -> Collection:
 
 
 def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[Chunk]:
+    # Chroma raises a bare TypeError from inside its validation layer for n_results
+    # below 1. Guard here so the message names the argument, and so the except
+    # clause below only ever sees operational failures, not caller mistakes.
+    if n_results < 1:
+        raise ValueError(f"n_results must be >= 1, got {n_results}")
+
     with langfuse.start_as_current_observation(
         as_type="span", name="retrieval", input={"query": q, "n_results": n_results}
     ) as span:
-        results = collection.query(query_texts=[q], n_results=n_results)
+        try:
+            results = collection.query(query_texts=[q], n_results=n_results)
+        except Exception as e:
+            # Broad on purpose. The embedding function runs inside query(), so a
+            # model-download or onnxruntime failure is not a ChromaError. Arguments
+            # are validated above, so anything reaching here is a failure of the
+            # retrieval subsystem whichever library raised it. Exception, not
+            # BaseException: cancellation and KeyboardInterrupt must pass through.
+            error_msg = f"Retrieval failed: {type(e).__name__}: {e}"
+            logger.error(error_msg)
+            span.update(level="ERROR", status_message=error_msg)
+            raise RetrievalError(error_msg) from e
+
+        # Outside the try: an unexpected results shape is a contract violation,
+        # not an operational failure, and should crash rather than be counted.
         docs = cast(list[list[str]], results["documents"])[0]
-        metas = cast(list[list[dict[str, str]]], results["metadatas"])[0]
+        metas = cast(list[list[dict[str, str] | None]], results["metadatas"])[0]
+
+        if not docs:
+            # Empty results mean either an unseeded collection or a query that
+            # legitimately matched nothing. count() separates them, and only the
+            # first is a failure. The extra roundtrip runs only on this rare path.
+            # count() is deliberately outside the try above: it can only run after
+            # query() already succeeded against the same store, so wrapping it would
+            # guard a window of microseconds.
+            if collection.count() == 0:
+                error_msg = f"Retrieval failed: collection '{collection.name}' is empty"
+                logger.error(error_msg)
+                span.update(level="ERROR", status_message=error_msg)
+                raise RetrievalError(error_msg)
+            logger.warning(f"No chunks matched query: '{q}'")
 
         chunks = []
-        for doc, meta in zip(docs, metas, strict=False):
-            chunks.append(Chunk(text=doc, source=meta.get("source", "unknown")))
+        # strict=True: chroma returns documents and metadatas of equal length, so a
+        # mismatch is the contract violation the casts above assume away. Silent
+        # truncation would drop chunks and degrade grounding with nothing logged.
+        for doc, meta in zip(docs, metas, strict=True):
+            # A record stored without metadata comes back as None, not {}.
+            source = meta.get("source", "unknown") if meta else "unknown"
+            chunks.append(Chunk(text=doc, source=source))
 
-        # langfuse: return output and end the span
         span.update(output=chunks)
-
-        # log: info when retrieval completes (chunks found)
         logger.info(f"Retrieval complete: found {len(chunks)} chunks.")
-
         return chunks
 
 
@@ -173,6 +208,12 @@ async def main_batch(
     max_concurrency: int = 5,
 ) -> BatchResult:
 
+    # Semaphore(0) is legal and starts with zero permits, so every task blocks on
+    # a release that never comes: a silent hang, not an error. Guard here rather
+    # than only at the CLI, since this is the layer that builds the semaphore.
+    if max_concurrency < 1:
+        raise ValueError(f"max_concurrency must be >= 1, got {max_concurrency}")
+
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def run_one(q: str) -> QueryResponse:
@@ -181,17 +222,40 @@ async def main_batch(
 
     coroutines = [run_one(q) for q in questions]
 
+    # return_exceptions=True keeps one bad question from cancelling its siblings.
+    # Cost: gather captures bugs too, so the partition below sorts them back apart.
     results = await asyncio.gather(*coroutines, return_exceptions=True)
 
     successes: list[QueryResponse] = []
     failures: list[tuple[str, BaseException]] = []
+    unexpected: list[BaseException] = []
 
     for question, outcome in zip(questions, results, strict=True):
-        if isinstance(outcome, BaseException):
+        # Cancellation is neither a failure nor a bug, and must propagate bare and
+        # immediately. Wrapped in a group it stops reading as cancellation, so
+        # asyncio.timeout never converts it and TaskGroup treats it as a crash.
+        if isinstance(outcome, asyncio.CancelledError):
+            raise outcome
+
+        # RAGError before the broad check: it is itself a BaseException, so this
+        # order decides whether a bad question is counted or crashes the batch.
+        if isinstance(outcome, RAGError):
             failures.append((question, outcome))
             logger.error(f"Batch run failed: {question}: {outcome}")
+        elif isinstance(outcome, BaseException):
+            unexpected.append(outcome)
+            logger.error(f"Unexpected exception for {question}", exc_info=outcome)
         else:
             successes.append(outcome)
+
+    if unexpected:
+        # Raise rather than return a partial result: a bug hitting every query
+        # would otherwise read as "N failures" to the caller.
+        # BaseExceptionGroup, not ExceptionGroup: the latter raises TypeError on
+        # members that are BaseException but not Exception.
+        raise BaseExceptionGroup(
+            f"{len(unexpected)} unexpected exception(s) during batch run", unexpected
+        )
 
     return BatchResult(successes=successes, failures=failures)
 
@@ -202,17 +266,19 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         stream=sys.stdout,
     )
+
     if len(sys.argv) > 1:
         user_question = " ".join(sys.argv[1:])
-
         collection = get_collection()
-        result = asyncio.run(main(collection, user_question))
 
-        print("\nAnswer:", result.answer)
-        print("\nSources:", result.sources)
-
-        # langfuse: ensure all background events are sent before script exists
-        langfuse.flush()
-
+        try:
+            result = asyncio.run(main(collection, user_question))
+            print("\nAnswer:", result.answer)
+            print("\nSources:", result.sources)
+        finally:
+            # Trace export runs in the background. Without this the process can exit
+            # before a failed run's ERROR-level span is sent, losing the one trace
+            # that mattered.
+            langfuse.flush()
     else:
         print("Error: No string provided.")

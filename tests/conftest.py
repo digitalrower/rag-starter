@@ -19,6 +19,9 @@
 #                        whether it was awaited. That recording is what the client
 #                        -lifecycle test asserts on.
 #
+#   empty_collection   : an in-memory collection with nothing in it, for the
+#                        unseeded-store branch of retrieval.
+#
 # The async methods (messages.create, aclose) are AsyncMock, not MagicMock,
 # because the code under test awaits them; awaiting a plain MagicMock raises
 # TypeError. The plain attribute reads (usage.input_tokens, etc.) stay MagicMock.
@@ -124,3 +127,12 @@ def stub_langfuse_trace() -> object:
     # tracing reduced to a no-op.
     with patch.object(query.langfuse, "get_current_trace_id", return_value="test-trace-id"):
         yield
+
+
+@pytest.fixture
+def empty_collection() -> Collection:
+    # A collection that exists but holds nothing. Chroma answers a query against
+    # it with an empty result set rather than an error, so the code has to tell an
+    # unseeded store apart from a query that legitimately matched nothing.
+    client = chromadb.EphemeralClient()
+    return client.create_collection(name=f"empty_docs_{uuid.uuid4().hex[:8]}")
