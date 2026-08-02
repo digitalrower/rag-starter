@@ -363,6 +363,9 @@ Runtime dependencies are listed in `requirements.txt`. See [Tech stack](#tech-st
     ├── .github/
     │   └── workflows/
     │       └── ci.yml            # mypy + ruff + pytest checks on every push
+    ├── Dockerfile                # Container build: embedding model + demo corpus baked in
+    ├── compose.yaml              # Docker Compose service definition
+    ├── .dockerignore
     ├── src/
     │   └── rag_starter/
     │       ├── __init__.py
@@ -386,7 +389,8 @@ Runtime dependencies are listed in `requirements.txt`. See [Tech stack](#tech-st
     ├── tests/
     │   ├── __init__.py
     │   ├── conftest.py           # fixtures: in-memory Chroma collection, mocked async client
-    │   └── test_query_batch.py   # async dispatcher contract + client-lifecycle tests
+    │   ├── test_query_batch.py   # async dispatcher contract + client-lifecycle tests
+    │   └── test_query_errors.py  # error-boundary + argument-guard tests
     ├── data/                     # Demonstration corpus (third-party; see data/NOTICE.md)
     ├── chroma_db/                # Persistent vector database (gitignored)
     ├── pyproject.toml            # mypy, ruff, pytest config + dev extra
@@ -394,6 +398,8 @@ Runtime dependencies are listed in `requirements.txt`. See [Tech stack](#tech-st
     ├── .gitignore
     ├── .python-version
     ├── requirements.txt
+    ├── LICENSE
+    ├── CLAUDE.md                 # Guidance for Claude Code when working in this repo
     └── README.md
 
 ---
