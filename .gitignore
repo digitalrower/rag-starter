@@ -29,11 +29,10 @@ Thumbs.db
 .vscode/
 .idea/
 .ipynb_checkpoints/
-.claude/
+.claude/settings.local.json
 CLAUDE.local.md
 
 # --- ML artifacts & datasets ---
-data/
 models/
 checkpoints/
 *.pth

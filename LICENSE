@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Digital Rower
+Copyright (c) 2026 Jack Monte
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,17 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+EXCEPTION: THIRD-PARTY CONTENT IN data/
+
+The MIT license above covers the source code, configuration, tests, and
+documentation authored in this repository. It does not cover the contents of
+the data/ directory.
+
+The files in data/ are Anthropic product documentation, copyright Anthropic PBC,
+all rights reserved. They are included unmodified as a demonstration corpus and
+are governed by Anthropic's own terms, not by this license. No rights in that
+content are granted, transferred, or sublicensed by this repository or its
+owner. See data/NOTICE.md for details.

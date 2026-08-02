@@ -45,7 +45,7 @@ This implementation uses chunked retrieval (RAG): splitting the corpus into piec
 - Scales gracefully as the corpus grows
 
 **When long-context beats RAG:**
-As of 2026, Anthropic's current models (Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6) support a 1M-token context window at standard pricing. For corpora that fit entirely in context (most documents under ~800K tokens), a single long-context call is often simpler and sometimes cheaper than chunking + retrieval. 
+As of 2026, Anthropic's current models (Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6) support a 1M-token context window at standard pricing. For corpora that fit entirely in context (most documents under ~800K tokens), a single long-context call is often simpler and sometimes cheaper than chunking + retrieval.
 
 If you're building a similar system for a different corpus, benchmark both approaches:
 - Time and cost to ingest and maintain RAG pipeline
@@ -72,6 +72,8 @@ For production, measure against your actual usage patterns before committing to 
 ## Eval results (current baseline)
 
 Automated eval harness using LLM-as-judge scoring (Claude Haiku, temperature=0). 40 test cases across four categories. Full dataset: `evals/dataset.json`.
+
+**These numbers are corpus-dependent.** The baseline was measured against the demonstration corpus in `data/`, and the 40 golden Q/A pairs in `evals/dataset.json` are keyed to it: the questions assume its content and the precision@3 judgments assume its chunk boundaries. Because that corpus ships with the repository, the baseline reproduces on a fresh clone. Swap in a different corpus and the harness still runs, but the scores measure how well your documents answer questions written for someone else's. To evaluate your own pipeline, replace `evals/dataset.json` with pairs written against your corpus and re-baseline. The methodology, the three metrics, the judge prompts, and the per-item error isolation all carry over unchanged.
 
 The three judges use Anthropic [structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) (constrained decoding via `messages.parse`), so the judge is guaranteed to return schema-valid JSON rather than free-text that has to be parsed. This replaced an earlier free-text-and-parse approach that intermittently failed when the judge prefaced its JSON with prose. See the note under Results.
 
@@ -185,11 +187,17 @@ Open `.env` and replace the placeholder with your actual Anthropic API key:
 
     ANTHROPIC_API_KEY=your_actual_api_key_here
 
+**Corpus:**
+
+A demonstration corpus ships in `data/` so the pipeline runs immediately. See `data/NOTICE.md` for its provenance and licensing, and [Ingest documents](#ingest-documents) to swap in your own.
+
 ---
 
 ## Ingest documents
 
-Documents should be placed in `./data/` as markdown or text files.
+A demonstration corpus ships in `data/`, so ingest works on a fresh clone with no setup. Those files are third-party documentation under separate terms; see `data/NOTICE.md`.
+
+To use your own corpus, replace the contents of `data/` with your own markdown. The loader reads `*.md` from the top level of the directory, treats each file as one source document, and uses the filename as the source attribution shown in query output. If the directory is empty, ingest completes with zero chunks and every query returns "I don't know based on the provided context." That is the grounding constraint working correctly, not a failure.
 
 **Run the ingestion pipeline:**
 
@@ -379,14 +387,14 @@ Runtime dependencies are listed in `requirements.txt`. See [Tech stack](#tech-st
     │   ├── __init__.py
     │   ├── conftest.py           # fixtures: in-memory Chroma collection, mocked async client
     │   └── test_query_batch.py   # async dispatcher contract + client-lifecycle tests
-    ├── data/                     # Source documents (markdown/text) 
+    ├── data/                     # Demonstration corpus (third-party; see data/NOTICE.md)
     ├── chroma_db/                # Persistent vector database (gitignored)
     ├── pyproject.toml            # mypy, ruff, pytest config + dev extra
     ├── .env.example              # Environment variable template
     ├── .gitignore
     ├── .python-version
     ├── requirements.txt
-    └── README.md                 
+    └── README.md
 
 ---
 
@@ -518,7 +526,7 @@ Expected: Claude says "I don't know based on the provided context" (no hallucina
 
 **Test 3, before/after comparison:**
 
-Run the same query through `src/rag_starter/query.py` (with retrieval) and compare to Claude's answer without retrieval (just the system prompt and question, no context). 
+Run the same query through `src/rag_starter/query.py` (with retrieval) and compare to Claude's answer without retrieval (just the system prompt and question, no context).
 - Does retrieval change the answer?
 - Is the grounded answer more accurate or more cautious?
 - Does Claude cite sources when retrieval is used?
@@ -546,4 +554,6 @@ Run the same query through `src/rag_starter/query.py` (with retrieval) and compa
 
 ## License
 
-MIT
+MIT, with one exception.
+
+The `data/` directory contains third-party documentation that is not covered by this grant. See `data/NOTICE.md` for details. All source code, configuration, tests, and documentation authored in this repository are MIT licensed.
