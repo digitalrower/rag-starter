@@ -22,8 +22,8 @@ target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
-# E = pycodestyle errors, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade
+select = ["E", "F", "I", "B", "UP", "W"]
+# E = pycodestyle errors, F = pyflakes, I = isort, B = bugbear, UP = pyupgrade, W = pycodestyle warnings
 
 [tool.ruff.lint.per-file-ignores]
 "evals/runner.py" = ["E402"]
