@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A RAG pipeline: ingest markdown docs → chunk → embed locally (Chroma, all-MiniLM-L6-v2) → store in a persistent Chroma collection → retrieve top-K chunks for a query → generate a grounded answer with Claude, constrained to answer only from context (else "I don't know"). Everything is traced in Langfuse. An LLM-as-judge eval harness scores faithfulness, relevance, and precision@3.
 
-The deeper rationale, eval baselines, and the production-pattern history live in `README.md` and `patterns-applied.md`. Read those before changing retrieval, judging, or the typed/error boundaries.
+The deeper rationale, eval baselines, and the production-pattern history live in `README.md`. Read those before changing retrieval, judging, or the typed/error boundaries.
 
 ## Setup & commands
 
@@ -77,4 +77,4 @@ Runtime dependencies are pinned in `requirements.txt` only. `pyproject.toml` dec
 - **Judges use structured outputs**, not free-text parsing: `client.messages.parse(..., output_format=ScoreResult)` at `temperature=0`, reading `response.parsed_output`. This is Anthropic-specific (constrained decoding) and replaced an earlier parse-and-strip approach that intermittently failed when the judge prefaced JSON with prose. `ScoreResult` is ordered `reasoning` then `score` on purpose so the judge reasons before committing to a number.
 - **`runner.py` is the source of truth for the baseline** (`results.json` / `summary.json`); `experiment.py` is additive (Langfuse Experiments) and shares the same three scorers. Keep them consistent.
 
-Default tuning knobs: `chunk_size=1500` / `overlap=200` (`ingest.py`), `n_results=3` / `max_tokens=500` (`query.py`). The standing finding (see README/`patterns-applied.md`) is that **retrieval is the weak link, not generation**, precision@3 is the metric to move.
+Default tuning knobs: `chunk_size=1500` / `overlap=200` (`ingest.py`), `n_results=3` / `max_tokens=500` (`query.py`). 
