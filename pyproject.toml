@@ -1,7 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "rag-starter"
 version = "0.1.0"
 requires-python = ">=3.13"
+# Keep in sync with requirements.txt manually — no enforcement yet (known gap).
+dependencies = [
+    "anthropic==0.100.0",
+    "chromadb==1.5.9",
+    "langfuse==4.6.1",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -20,6 +35,7 @@ strict_equality = true
 [tool.ruff]
 target-version = "py313"
 line-length = 100
+exclude = ["scripts/utilities/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "W"]
@@ -30,7 +46,6 @@ select = ["E", "F", "I", "B", "UP", "W"]
 "evals/experiment.py" = ["E402"]
 "scripts/seed_langfuse_dataset.py" = ["E402"]
 "scripts/benchmark_batch.py" = ["E402"]
-"scripts/utilities/**/*.py" = ["E402", "F841", "E501"]
 
 [project.optional-dependencies]
 dev = [
