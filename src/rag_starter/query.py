@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+from functools import cache
 from typing import cast
 
 import chromadb
@@ -18,13 +19,18 @@ from rag_starter.models import BatchResult, Chunk, QueryResponse
 logger = logging.getLogger(__name__)
 
 
+@cache
 def _langfuse() -> Langfuse:
     """Resolve the Langfuse client on first use rather than at import.
 
     get_client() reads LANGFUSE_* at construction time, so a module-level
     singleton would latch a keyless, no-op client before an entry point had a
-    chance to call load_dotenv(). get_client() is itself process-wide cached,
-    so this indirection adds a lookup, not a second client.
+    chance to call load_dotenv().
+
+    Cached because get_client() is not itself cached: it builds a fresh Langfuse
+    facade on every call, under a lock, over a shared LangfuseResourceManager.
+    Without @cache the five call sites here would each construct one per query.
+    Caching also keeps this a stable patch target for tests.
     """
     return get_client()
 
