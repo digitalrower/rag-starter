@@ -7,20 +7,26 @@ import chromadb
 from anthropic import APIError
 from anthropic.types import TextBlock
 from chromadb import Collection
-from langfuse import get_client, propagate_attributes
+from dotenv import load_dotenv
+from langfuse import Langfuse, get_client, propagate_attributes
 
 from rag_starter.client import get_async_anthropic_client
 from rag_starter.errors import GenerationError, RAGError, RetrievalError
 from rag_starter.models import BatchResult, Chunk, QueryResponse
 
-# from dotenv import load_dotenv
-# load_dotenv()
-
-# langfuse: initialize langfuse client
-langfuse = get_client()
-
 # logging
 logger = logging.getLogger(__name__)
+
+
+def _langfuse() -> Langfuse:
+    """Resolve the Langfuse client on first use rather than at import.
+
+    get_client() reads LANGFUSE_* at construction time, so a module-level
+    singleton would latch a keyless, no-op client before an entry point had a
+    chance to call load_dotenv(). get_client() is itself process-wide cached,
+    so this indirection adds a lookup, not a second client.
+    """
+    return get_client()
 
 
 def get_collection() -> Collection:
@@ -35,7 +41,7 @@ def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[
     if n_results < 1:
         raise ValueError(f"n_results must be >= 1, got {n_results}")
 
-    with langfuse.start_as_current_observation(
+    with _langfuse().start_as_current_observation(
         as_type="span", name="retrieval", input={"query": q, "n_results": n_results}
     ) as span:
         try:
@@ -101,7 +107,7 @@ def build_prompt(user_question: str, chunks: list[Chunk]) -> str:
 
 async def generate_answer(prompt: str) -> str:
     model_name = "claude-haiku-4-5-20251001"
-    with langfuse.start_as_current_observation(
+    with _langfuse().start_as_current_observation(
         as_type="generation",
         name="generation",
         model=model_name,
@@ -161,12 +167,14 @@ async def main(
     # log: INFO when a query is received (start of the request)
     logger.info(f"Query received: '{user_question}'")
 
-    with langfuse.start_as_current_observation(
+    with _langfuse().start_as_current_observation(
         as_type="span", name="main_rag_query", input={"user_question": user_question}
     ) as span:
-        # langfuse: capture the trace id
-        trace_id = langfuse.get_current_trace_id()
-        assert trace_id is not None, "trace_id should never be None inside an active span"
+        # langfuse: capture the trace id. None when tracing is disabled (no
+        # LANGFUSE_* keys), in which case the client is a no-op tracer and there
+        # is no live span to read an id from. That is a supported degraded mode,
+        # not an error, so the id flows through to QueryResponse as None.
+        trace_id = _langfuse().get_current_trace_id()
 
         if session_id or tags:
             with propagate_attributes(session_id=session_id, tags=tags or []):
@@ -261,6 +269,11 @@ async def main_batch(
 
 
 if __name__ == "__main__":
+    # Load .env before anything reads an env var. The Langfuse client is resolved
+    # lazily (see _langfuse), so this runs early enough for it; the module top is
+    # deliberately left free of this side effect so importing query.py stays pure.
+    load_dotenv()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -269,9 +282,10 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1:
         user_question = " ".join(sys.argv[1:])
-        collection = get_collection()
 
         try:
+            # Inside the try so a missing collection still reaches the flush below.
+            collection = get_collection()
             result = asyncio.run(main(collection, user_question))
             print("\nAnswer:", result.answer)
             print("\nSources:", result.sources)
@@ -279,6 +293,6 @@ if __name__ == "__main__":
             # Trace export runs in the background. Without this the process can exit
             # before a failed run's ERROR-level span is sent, losing the one trace
             # that mattered.
-            langfuse.flush()
+            _langfuse().flush()
     else:
         print("Error: No string provided.")
