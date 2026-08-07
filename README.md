@@ -175,9 +175,18 @@ This path is additive and does not replace the canonical local harness. `runner.
     source .venv/bin/activate     # Mac/Linux
     # Windows: .venv\Scripts\activate
 
-**Install dependencies:**
+**Install the package and its dependencies:**
 
-    pip install -r requirements.txt
+    pip install -e .
+
+This installs `rag_starter` itself along with the five pinned runtime
+dependencies. It is the whole install step: `requirements.txt` holds the same
+five pins and exists for the Docker layer cache and CI, so you do not need to
+install from it separately. Contributors also need the dev tooling, covered
+under [Code quality](#code-quality).
+
+The package must be installed rather than run from the source tree: this project
+uses a `src/` layout, so `python -m rag_starter.query` cannot resolve without it.
 
 **Set up environment variables:**
 
@@ -186,6 +195,17 @@ This path is additive and does not replace the canonical local harness. `runner.
 Open `.env` and replace the placeholder with your actual Anthropic API key:
 
     ANTHROPIC_API_KEY=your_actual_api_key_here
+
+`ANTHROPIC_API_KEY` is required; the CLI exits with a `ConfigurationError` naming
+it if it is missing. The `LANGFUSE_*` keys are optional. Without them the
+pipeline still ingests, retrieves, and answers, and simply logs a warning at
+startup that tracing is disabled: no traces are recorded and eval runs produce
+no scores. If you do set them, make sure `LANGFUSE_BASE_URL` matches the region
+your keys came from, since the SDK defaults to the EU host.
+
+**Run commands from the repository root.** The vector store and corpus paths
+(`./chroma_db`, `./data`) resolve against the current working directory. Running
+from elsewhere silently creates an empty store instead of reporting an error.
 
 **Corpus:**
 
@@ -208,6 +228,13 @@ This will:
 2. Chunk them (1,500 characters, 200-character overlap)
 3. Embed and store in `./chroma_db/`
 4. Print a summary of the total chunks added and the collection count
+
+**First run downloads the embedding model.** Embeddings are computed locally with
+`all-MiniLM-L6-v2`, which Chroma fetches on first use (roughly 80 MB, cached in
+`~/.cache/chroma/` and reused afterwards). That one run needs network access; on
+a cold cache without it, ingest fails with a `RetrievalError` wrapping a
+connection error. The Docker image bakes this download in at build time, so the
+container never fetches it at runtime.
 
 The collection is persistent. Run this once, then query as many times as you want without re-ingesting.
 
@@ -285,6 +312,13 @@ Then use `digitalrower/rag-starter:latest` in place of `rag-starter:latest` in t
 
 Querying before ingest fails with `Collection [anthropic_docs] does not exist`. That is expected; run the ingest step first. A collection that exists but holds no chunks raises `RetrievalError` naming the empty collection, which is the same fix.
 
+**With Docker Compose instead.** `compose.yaml` wires up the same image, volume, and `.env` injection, so the build, volume creation, and `--env-file` flags above become implicit. It requires a `.env` file to exist; Compose errors out if it is missing. Ingest is still an explicit one-time step against the fresh volume:
+
+    docker compose run --rm rag-starter python -m rag_starter.ingest
+    docker compose run --rm rag-starter
+
+The second command inherits the image's default command, the demo question. There is a single service by design: Chroma runs in-process against the mounted volume, so there is no separate datastore container.
+
 ---
 
 ## Batch queries (async)
@@ -353,7 +387,7 @@ Run them with `pytest -v`.
 - Git
 - An Anthropic API key ([get one here](https://console.anthropic.com))
 
-Runtime dependencies are listed in `requirements.txt`. See [Tech stack](#tech-stack) below. Development tooling (tests, type checking, linting) installs via the `dev` extra: `pip install -e ".[dev]"`.
+Runtime dependencies are declared in `pyproject.toml` and mirrored, at identical pins, in `requirements.txt` for the Docker layer cache and CI. `pip install -e .` reads the former. See [Tech stack](#tech-stack) below. Development tooling (tests, type checking, linting) installs via the `dev` extra: `pip install -e ".[dev]"`.
 
 ---
 
@@ -462,7 +496,7 @@ Answer: Claude's grounded answer based on retrieved context...
 Sources: ['source-file-1.md', 'source-file-2.md']
 ```
 
-Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answer`, `sources`, `chunks`, `trace_id`); see `src/rag_starter/models.py`.
+Programmatically, `query.main(...)` returns a typed `QueryResponse` model (`answer`, `sources`, `chunks`, `trace_id`); see `src/rag_starter/models.py`. `trace_id` is `None` when tracing is disabled, so treat it as optional rather than assuming a string.
 
 **Behavior:**
 - Returns top-3 semantically similar chunks
@@ -494,12 +528,15 @@ Common issues and solutions:
 | `RetrievalError: <ExceptionClass>: ...` | The vector store or the embedding model failed. The wrapped class names the cause: an `httpx` error means the embedding model could not be downloaded on a cold cache, a `ChromaError` means the store itself failed | Check network access on first run, then disk space and the `chroma_db/` path |
 | `ValueError: n_results must be >= 1` | `retrieve_chunks` called with a non-positive chunk count | Pass 1 or more |
 | `ValueError: max_concurrency must be >= 1` | `main_batch` or `--max-concurrency` given a non-positive cap | Pass 1 or more. Zero would build a semaphore with no permits and block forever |
-| `ANTHROPIC_API_KEY not set` | Missing `.env` file or key | Copy `.env.example` to `.env` and add your key |
+| `ConfigurationError: ANTHROPIC_API_KEY is not set` | Missing `.env` file or key. Note `.env` is read by the CLI and eval entry points, not on library import | Copy `.env.example` to `.env` and add your key, or export the variable directly |
+| `ModuleNotFoundError: No module named 'rag_starter'` | The package was never installed; this is a `src/` layout | Run `pip install -e .` from the repository root |
 | `AuthenticationError` | Invalid API key | Verify key at console.anthropic.com |
 | `RateLimitError` | Too many requests to Claude | Wait a moment and retry |
 | No chunks matched, logged as a warning | The query matched nothing in a populated collection | Not an error. Try a different query or check corpus relevance |
 
 Retrieval failures raise `RetrievalError`, a subclass of `RAGError`, which means a batch counts them as failed questions and continues rather than aborting. The wrapped exception is preserved as `__cause__`, so the traceback shows the underlying cause alongside the wrapper.
+
+`ConfigurationError` sits deliberately outside that hierarchy. `RAGError` means "this item failed"; missing configuration is a run-level condition, so it aborts rather than being counted per item. Otherwise a missing key would mark every eval item as errored and still write a full results file, and a batch would report a single misconfiguration as N failed questions. Entry points call a preflight check at startup so this surfaces before retrieval and before the one-time embedding-model download.
 
 ---
 

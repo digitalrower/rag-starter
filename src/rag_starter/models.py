@@ -14,7 +14,10 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[str]
     chunks: list[Chunk]
-    trace_id: str
+    # None when Langfuse tracing is disabled (no LANGFUSE_* keys): the client
+    # falls back to a no-op tracer, so there is no live span to read an id from.
+    # Required but nullable, so callers still have to pass it explicitly.
+    trace_id: str | None
 
 
 @dataclass

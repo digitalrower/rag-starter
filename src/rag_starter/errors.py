@@ -1,3 +1,14 @@
+class ConfigurationError(Exception):
+    """Required configuration is missing or unusable.
+
+    Deliberately NOT a RAGError. RAGError means "this item failed" and is caught
+    per-item by the eval runner and by main_batch. Missing configuration is a
+    run-level condition: under RAGError every eval item would fail identically
+    and the run would write a results file full of errored items instead of
+    aborting, and main_batch would report a config error as N failed questions.
+    """
+
+
 class RAGError(Exception):
     """Base for all rag-starter errors."""
 

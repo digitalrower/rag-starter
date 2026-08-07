@@ -11,6 +11,7 @@
 # call position.
 # =============================================================================
 
+import logging
 from collections.abc import Callable, Coroutine
 from unittest.mock import patch
 
@@ -18,7 +19,8 @@ import pytest
 from chromadb import Collection
 
 from rag_starter import query
-from rag_starter.errors import GenerationError, RetrievalError
+from rag_starter.client import get_async_anthropic_client, preflight_env
+from rag_starter.errors import ConfigurationError, GenerationError, RetrievalError
 
 # Patched where it is looked up. main() calls generate_answer through the query
 # module's namespace, so that is the name the patch has to replace.
@@ -44,7 +46,6 @@ def _generate_failing_on_one(
 @pytest.mark.asyncio
 async def test_ragerror_is_counted_and_batch_continues(
     seeded_collection: Collection,
-    stub_langfuse_trace: object,
 ) -> None:
     # A RAGError is a failed question, not a broken run. It lands in failures
     # paired with its question, and the remaining queries still return.
@@ -64,7 +65,6 @@ async def test_ragerror_is_counted_and_batch_continues(
 @pytest.mark.asyncio
 async def test_unexpected_exception_aborts_the_batch(
     seeded_collection: Collection,
-    stub_langfuse_trace: object,
 ) -> None:
     # Anything outside the RAGError hierarchy is a bug rather than a bad question,
     # so it is raised after the remaining tasks settle instead of being counted.
@@ -76,6 +76,55 @@ async def test_unexpected_exception_aborts_the_batch(
 
     assert len(excinfo.value.exceptions) == 1
     assert isinstance(excinfo.value.exceptions[0], RuntimeError)
+
+
+@pytest.mark.asyncio
+async def test_configuration_error_aborts_the_batch(
+    seeded_collection: Collection,
+) -> None:
+    # ConfigurationError inherits Exception, not RAGError, on purpose: a missing
+    # key is a broken run, not a bad question. If it were a RAGError this batch
+    # would report it as one failed question among two successes, and an eval run
+    # would write a full results file of identically-errored items instead of
+    # stopping. Pinning it here so the inheritance cannot be "tidied" later.
+    with patch(GENERATE, _generate_failing_on_one(ConfigurationError("no key"))):
+        with pytest.raises(BaseExceptionGroup) as excinfo:
+            await query.main_batch(seeded_collection, QUESTIONS, max_concurrency=2)
+
+    assert len(excinfo.value.exceptions) == 1
+    assert isinstance(excinfo.value.exceptions[0], ConfigurationError)
+
+
+def test_client_factory_raises_on_missing_anthropic_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The Anthropic SDK builds a client happily with no key and only fails at
+    # request time, with a bare TypeError that generate_answer's `except APIError`
+    # does not catch. The factory guard converts that into a named error at
+    # construction. raising=False so this holds whether or not the developer's
+    # shell exports the key.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+        get_async_anthropic_client()
+
+
+def test_preflight_warns_about_langfuse_before_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A fresh checkout is missing every key at once. Order matters: raising on the
+    # Anthropic key first would report one problem, and only surface the Langfuse
+    # warning on the user's next run. Both must come out of a single pass.
+    for var in ("ANTHROPIC_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="rag_starter.client"):
+        with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+            preflight_env()
+
+    assert "LANGFUSE_PUBLIC_KEY" in caplog.text
+    assert "LANGFUSE_SECRET_KEY" in caplog.text
 
 
 @pytest.mark.asyncio
