@@ -41,7 +41,6 @@ CLIENT_FACTORY = "rag_starter.query.get_async_anthropic_client"
 async def test_batch_returns_n_responses(
     seeded_collection: Collection,
     mock_async_client: MagicMock,
-    stub_langfuse_trace: object,
 ) -> None:
     questions = ["What is Claude?", "What is ChromaDB?", "What is FastAPI?"]
 
@@ -67,7 +66,6 @@ async def test_batch_returns_n_responses(
 def test_main_sync_closes_async_client(
     seeded_collection: Collection,
     mock_async_client: MagicMock,
-    stub_langfuse_trace: object,
 ) -> None:
     # Plain def (see module header): main_sync must own its asyncio.run loop for
     # this to reproduce the real teardown condition.
@@ -86,3 +84,35 @@ def test_main_sync_closes_async_client(
     #   BEFORE the fix: generate_answer never calls aclose(), so this FAILS.
     #   AFTER the fix (await client.close() added in generate_answer): PASSES.
     mock_async_client.close.assert_awaited_once()
+
+
+def test_main_returns_none_trace_id_when_tracing_disabled(
+    seeded_collection: Collection,
+    mock_async_client: MagicMock,
+) -> None:
+    # Plain def, not async: main_sync owns its own asyncio.run loop, and an async
+    # test would already hold a running one (see the module header).
+    #
+    # Tracing is optional. With no LANGFUSE_* keys the client degrades to a no-op
+    # tracer and get_current_trace_id() returns None, which used to trip an assert
+    # in main() before any retrieval ran. That id must now flow through to
+    # QueryResponse untouched rather than raising.
+    #
+    # The seam is patched rather than relying on the ambient environment, since
+    # whether the real client is keyless depends on what the developer's shell
+    # exports. Patching pins the condition under test either way. This works only
+    # because _langfuse is @cache'd: get_client() itself returns a fresh facade
+    # per call, so patching the object it returns would patch a throwaway.
+    #
+    # CLIENT_FACTORY is patched too, and must be: without it main() reaches the
+    # real generate_answer, which calls get_async_anthropic_client and now raises
+    # ConfigurationError when ANTHROPIC_API_KEY is unset. The subject here is the
+    # trace id, not Anthropic auth.
+    with (
+        patch.object(query._langfuse(), "get_current_trace_id", return_value=None),
+        patch(CLIENT_FACTORY, return_value=mock_async_client),
+    ):
+        result = query.main_sync(seeded_collection, "What is Claude?")
+
+    assert isinstance(result, QueryResponse)
+    assert result.trace_id is None

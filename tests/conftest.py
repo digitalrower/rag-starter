@@ -1,9 +1,13 @@
 # =============================================================================
 # conftest.py
 #
-# Shared fixtures for the query-pipeline tests. Two fixtures live here because
-# both test files need them and pytest auto-discovers conftest fixtures without
-# an import.
+# Shared fixtures for the query-pipeline tests. They live here because both test
+# files need them and pytest auto-discovers conftest fixtures without an import.
+#
+# There is deliberately no Langfuse trace stub. main() used to assert that
+# get_current_trace_id() was not None, which forced every test through a patch;
+# a None trace id is now a supported degraded mode, so tests run against the
+# real (keyless, no-op) client and only the trace_id test patches that seam.
 #
 #   seeded_collection  : a real in-memory Chroma collection holding three tiny
 #                        hand-written docs. Real Chroma behavior (so retrieval
@@ -28,13 +32,11 @@
 # =============================================================================
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import chromadb
 import pytest
 from chromadb import Collection
-
-from rag_starter import query
 
 
 @pytest.fixture
@@ -113,20 +115,6 @@ def mock_async_client() -> MagicMock:
     client.close = AsyncMock()
 
     return client
-
-
-@pytest.fixture
-def stub_langfuse_trace() -> object:
-    # main() calls langfuse.get_current_trace_id() and asserts it is not None. In
-    # the test environment there is no live Langfuse span context, so that call
-    # returns None and the assert fails before the code under test is reached.
-    #
-    # query.py binds `langfuse = get_client()` at module import, so the seam to
-    # patch is the get_current_trace_id method on that module-level object. A
-    # stable fake id lets main() proceed through its real control flow with
-    # tracing reduced to a no-op.
-    with patch.object(query.langfuse, "get_current_trace_id", return_value="test-trace-id"):
-        yield
 
 
 @pytest.fixture
