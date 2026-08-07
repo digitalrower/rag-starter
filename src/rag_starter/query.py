@@ -10,7 +10,7 @@ from chromadb import Collection
 from dotenv import load_dotenv
 from langfuse import Langfuse, get_client, propagate_attributes
 
-from rag_starter.client import get_async_anthropic_client
+from rag_starter.client import get_async_anthropic_client, preflight_env
 from rag_starter.errors import GenerationError, RAGError, RetrievalError
 from rag_starter.models import BatchResult, Chunk, QueryResponse
 
@@ -279,6 +279,10 @@ if __name__ == "__main__":
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         stream=sys.stdout,
     )
+
+    # After load_dotenv and basicConfig: the check reads the loaded env, and its
+    # warning needs logging configured to be visible.
+    preflight_env()
 
     if len(sys.argv) > 1:
         user_question = " ".join(sys.argv[1:])

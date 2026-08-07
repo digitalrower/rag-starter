@@ -14,6 +14,7 @@ from pydantic import TypeAdapter
 
 from evals.scorer import score_answer_relevance, score_faithfulness, score_precision
 from rag_starter import query
+from rag_starter.client import preflight_env
 from rag_starter.errors import RAGError
 from rag_starter.models import EvalItem, EvalResult
 
@@ -223,6 +224,11 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
 
 if __name__ == "__main__":
     configure_logging()
+
+    # load_dotenv already ran at module top; this checks the result. A missing
+    # Anthropic key aborts here rather than failing all N items identically, and
+    # missing Langfuse keys warn now rather than silently writing zero scores.
+    preflight_env()
 
     parser = argparse.ArgumentParser(description="Evaluation Runner for AI datasets")
 
