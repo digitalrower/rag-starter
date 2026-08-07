@@ -11,6 +11,7 @@
 # call position.
 # =============================================================================
 
+import logging
 from collections.abc import Callable, Coroutine
 from unittest.mock import patch
 
@@ -18,7 +19,7 @@ import pytest
 from chromadb import Collection
 
 from rag_starter import query
-from rag_starter.client import get_async_anthropic_client
+from rag_starter.client import get_async_anthropic_client, preflight_env
 from rag_starter.errors import ConfigurationError, GenerationError, RetrievalError
 
 # Patched where it is looked up. main() calls generate_answer through the query
@@ -106,6 +107,24 @@ def test_client_factory_raises_on_missing_anthropic_key(
 
     with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
         get_async_anthropic_client()
+
+
+def test_preflight_warns_about_langfuse_before_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A fresh checkout is missing every key at once. Order matters: raising on the
+    # Anthropic key first would report one problem, and only surface the Langfuse
+    # warning on the user's next run. Both must come out of a single pass.
+    for var in ("ANTHROPIC_API_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="rag_starter.client"):
+        with pytest.raises(ConfigurationError, match="ANTHROPIC_API_KEY"):
+            preflight_env()
+
+    assert "LANGFUSE_PUBLIC_KEY" in caplog.text
+    assert "LANGFUSE_SECRET_KEY" in caplog.text
 
 
 @pytest.mark.asyncio

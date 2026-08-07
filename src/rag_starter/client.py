@@ -35,18 +35,22 @@ def _require_anthropic_key() -> None:
 def preflight_env() -> None:
     """Check configuration once, at entry-point startup, before doing real work.
 
-    Hard-fails on a missing Anthropic key so the error arrives before retrieval
-    and the one-time embedding-model download, rather than after. Tracing is
-    optional, so missing Langfuse keys only warn -- but they warn loudly, because
-    a keyless eval run otherwise writes zero scores and still looks successful.
+    Warnings are emitted before the hard failure, deliberately: a fresh checkout
+    is typically missing every key at once, and raising first would report the
+    Anthropic key, then only reveal the Langfuse warning on the next run. One
+    pass should surface every configuration problem.
+
+    Tracing is optional, so missing Langfuse keys only warn -- but they warn
+    loudly, because a keyless eval run otherwise writes zero scores and still
+    looks successful. A missing Anthropic key is fatal, and failing here puts
+    that error before retrieval and before the one-time embedding-model
+    download rather than after.
 
     Env vars are read directly rather than asking the Langfuse client whether it
     is enabled: on the keyless path it keeps _tracing_enabled True and only swaps
     in a no-op tracer, and auth_check() is a blocking network call its own
     docstring discourages.
     """
-    _require_anthropic_key()
-
     missing = [var for var in LANGFUSE_KEY_VARS if not os.environ.get(var)]
     if missing:
         logger.warning(
@@ -55,6 +59,8 @@ def preflight_env() -> None:
             "no scores.",
             ", ".join(missing),
         )
+
+    _require_anthropic_key()
 
 
 def get_anthropic_client(
