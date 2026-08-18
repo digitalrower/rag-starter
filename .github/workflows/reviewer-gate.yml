@@ -1,0 +1,50 @@
+name: Reviewer gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+jobs:
+  reviewer-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
+          plugins: 'code-review@claude-code-plugins'
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
+            --max-budget-usd 2
+            --json-schema {"type":"object","properties":{"verdict":{"type":"string","enum":["block","nit","pass"]},"reason":{"type":"string"}},"required":["verdict","reason"]}
+
+      - name: Enforce review verdict
+        if: ${{ !cancelled() }}
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
+        run: |
+          if [ -z "$STRUCTURED_OUTPUT" ]; then
+            echo "Review produced no structured output. Failing closed."
+            exit 1
+          fi
+          verdict=$(printf '%s' "$STRUCTURED_OUTPUT" | jq -r '.verdict // empty')
+          reason=$(printf '%s' "$STRUCTURED_OUTPUT" | jq -r '.reason // empty')
+          echo "Verdict: ${verdict:-<none>}"
+          echo "Reason: ${reason:-<none>}"
+          if [ "$verdict" != "pass" ] && [ "$verdict" != "nit" ]; then
+            exit 1
+          fi
