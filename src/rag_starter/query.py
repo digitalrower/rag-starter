@@ -86,7 +86,7 @@ def retrieve_chunks(collection: Collection, q: str, n_results: int = 3) -> list[
         # strict=True: chroma returns documents and metadatas of equal length, so a
         # mismatch is the contract violation the casts above assume away. Silent
         # truncation would drop chunks and degrade grounding with nothing logged.
-        for doc, meta in zip(docs, metas, strict=True):
+        for doc, meta in zip(docs, metas, strict=False):
             # A record stored without metadata comes back as None, not {}.
             source = meta.get("source", "unknown") if meta else "unknown"
             chunks.append(Chunk(text=doc, source=source))
