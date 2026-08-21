@@ -16,7 +16,7 @@ from evals.scorer import score_answer_relevance, score_faithfulness, score_preci
 from rag_starter import query
 from rag_starter.client import preflight_env
 from rag_starter.errors import RAGError
-from rag_starter.models import EvalItem, EvalResult
+from rag_starter.models import EvalItem, EvalResult, EvalSummary
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
@@ -184,9 +184,7 @@ def print_summary(results: list[EvalResult]) -> None:
     print(f"\nErrored items: {len(errored)} / {len(results)}")
 
 
-def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def build_summary(results: list[EvalResult]) -> EvalSummary:
     categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
     summary: dict[str, object] = {}
     all_faith, all_relev, all_prec = [], [], []
@@ -218,8 +216,14 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
         "count": len(all_faith),
         "errored": len(errored),
     }
+    return EvalSummary.model_validate(summary)
+
+
+def write_summary(summary: EvalSummary, output_path: str | Path) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(summary, f, indent=2)
+        json.dump(summary.model_dump(), f, indent=2)
 
 
 if __name__ == "__main__":
@@ -270,7 +274,8 @@ if __name__ == "__main__":
     RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
     SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
     write_results(graded, RESULTS_PATH)
-    write_summary(graded, SUMMARY_PATH)
+    summary = build_summary(graded)
+    write_summary(summary, SUMMARY_PATH)
     print_summary(graded)
 
     # langfuse: flush events before the script exits
