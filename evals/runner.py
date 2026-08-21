@@ -226,6 +226,14 @@ def write_summary(summary: EvalSummary, output_path: str | Path) -> None:
         json.dump(summary.model_dump(), f, indent=2)
 
 
+def load_baseline(path: str | Path) -> EvalSummary:
+    path = Path(path)
+    if not path.exists():
+        logging.error(f"No baseline at {path}. Run with --baseline first.")
+        sys.exit(1)
+    return EvalSummary.model_validate_json(path.read_bytes())
+
+
 if __name__ == "__main__":
     configure_logging()
 
