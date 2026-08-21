@@ -254,7 +254,16 @@ if __name__ == "__main__":
         help="Run only items with these specific IDs (e.g. --ids 027 031)",
     )
 
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Write this run's summary to evals/baseline.json as the tracked baseline",
+    )
+
     args = parser.parse_args()
+
+    if args.baseline and (args.limit is not None or args.ids is not None):
+        parser.error("--baseline cannot be combined with --limit or --ids")
 
     DATASET_PATH = Path(__file__).parent / "dataset.json"
     dataset = load_dataset(DATASET_PATH)
@@ -273,9 +282,13 @@ if __name__ == "__main__":
     graded = run_eval(dataset, collection)
     RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
     SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
+    BASELINE_PATH = Path(__file__).parent / "baseline.json"
     write_results(graded, RESULTS_PATH)
     summary = build_summary(graded)
     write_summary(summary, SUMMARY_PATH)
+    if args.baseline:
+        write_summary(summary, BASELINE_PATH)
+        print(f"\nBaseline written to {BASELINE_PATH}")
     print_summary(graded)
 
     # langfuse: flush events before the script exits
