@@ -229,7 +229,7 @@ def write_summary(summary: EvalSummary, output_path: str | Path) -> None:
 def load_baseline(path: str | Path) -> EvalSummary:
     path = Path(path)
     if not path.exists():
-        logging.error(f"No baseline at {path}. Run with --baseline first.")
+        logger.error(f"No baseline at {path}. Run with --baseline first.")
         sys.exit(1)
     return EvalSummary.model_validate_json(path.read_bytes())
 
@@ -266,7 +266,6 @@ def print_comparison(current: EvalSummary, baseline: EvalSummary) -> None:
         print(f"{name:<20}{faith:<16}{relev:<13}{prec}")
 
 
-
 if __name__ == "__main__":
     configure_logging()
 
@@ -301,12 +300,22 @@ if __name__ == "__main__":
         help="Write this run's summary to evals/baseline.json as the tracked baseline",
     )
 
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare this run's summary against evals/baseline.json",
+    )
+
     args = parser.parse_args()
 
-    if args.baseline and (args.limit is not None or args.ids is not None):
-        parser.error("--baseline cannot be combined with --limit or --ids")
+    if (args.baseline or args.compare) and (args.limit is not None or args.ids is not None):
+        parser.error("--baseline and --compare cannot be combined with --limit or --ids")
 
     DATASET_PATH = Path(__file__).parent / "dataset.json"
+    RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
+    SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
+    BASELINE_PATH = Path(__file__).parent / "baseline.json"
+
     dataset = load_dataset(DATASET_PATH)
 
     # Filtering Logic
@@ -314,16 +323,15 @@ if __name__ == "__main__":
         wanted_ids = set(args.ids)  # convert to set for O(1) lookups
         dataset = [item for item in dataset if item.id in wanted_ids]
         if not dataset:
-            logging.error(f"No matching items found for IDs: {args.ids}")
+            logger.error(f"No matching items found for IDs: {args.ids}")
             sys.exit(1)
     elif args.limit is not None:
         dataset = dataset[: args.limit]
 
+    baseline = load_baseline(BASELINE_PATH) if args.compare else None
+
     collection = query.get_collection()
     graded = run_eval(dataset, collection)
-    RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
-    SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
-    BASELINE_PATH = Path(__file__).parent / "baseline.json"
     write_results(graded, RESULTS_PATH)
     summary = build_summary(graded)
     write_summary(summary, SUMMARY_PATH)
@@ -331,6 +339,9 @@ if __name__ == "__main__":
         write_summary(summary, BASELINE_PATH)
         print(f"\nBaseline written to {BASELINE_PATH}")
     print_summary(graded)
+
+    if args.compare and baseline is not None:
+        print_comparison(summary, baseline)
 
     # langfuse: flush events before the script exits
     langfuse.flush()
