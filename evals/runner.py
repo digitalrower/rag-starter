@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 # Derived from the model so a category change is a single edit in models.py.
 CATEGORIES = [name for name in EvalSummary.model_fields if name != "overall"]
 
+README_TABLE_START = "<!-- eval-table:start -->"
+README_TABLE_END = "<!-- eval-table:end -->"
+
 
 def configure_logging() -> None:
     logging.basicConfig(
@@ -266,6 +269,51 @@ def print_comparison(current: EvalSummary, baseline: EvalSummary) -> None:
         print(f"{name:<20}{faith:<16}{relev:<13}{prec}")
 
 
+def format_metric(value: float | None) -> str:
+    return f"{value:.2f}" if value is not None else "N/A"
+
+
+def render_table(summary: EvalSummary) -> str:
+    lines = [
+        "| Category | Avg Faithfulness | Avg Relevance | Precision@3 | Count |",
+        "|---|---|---|---|---|",
+    ]
+    for name in CATEGORIES:
+        block = getattr(summary, name)
+        if block is None:
+            continue
+        lines.append(
+            f"| {name} | {format_metric(block.faithfulness)} | "
+            f"{format_metric(block.relevance)} | "
+            f"{format_metric(block.precision)} | {block.count} |"
+        )
+    o = summary.overall
+    lines.append(
+        f"| **OVERALL** | **{format_metric(o.faithfulness)}** | "
+        f"**{format_metric(o.relevance)}** | "
+        f"**{format_metric(o.precision)}** | **{o.count}** |"
+    )
+    lines.append("")
+    lines.append(f"n = {o.count}, {o.errored} errored items.")
+    return "\n".join(lines)
+
+
+def update_readme(summary: EvalSummary, path: str | Path) -> None:
+    path = Path(path)
+    text = path.read_text()
+    start = text.find(README_TABLE_START)
+    end = text.find(README_TABLE_END)
+    if start == -1 or end == -1:
+        logger.error(f"Table markers not found in {path}. "
+                     f"Expected {README_TABLE_START} and {README_TABLE_END}."
+        )
+        sys.exit(1)
+    before = text[: start + len(README_TABLE_START)]
+    after = text[end:]
+    path.write_text(f"{before}\n{render_table(summary)}\n{after}")
+
+
+
 if __name__ == "__main__":
     configure_logging()
 
@@ -315,6 +363,7 @@ if __name__ == "__main__":
     RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
     SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
     BASELINE_PATH = Path(__file__).parent / "baseline.json"
+    README_PATH = Path(__file__).parent.parent / "README.md"
 
     dataset = load_dataset(DATASET_PATH)
 
@@ -337,7 +386,9 @@ if __name__ == "__main__":
     write_summary(summary, SUMMARY_PATH)
     if args.baseline:
         write_summary(summary, BASELINE_PATH)
+        update_readme(summary, README_PATH)
         print(f"\nBaseline written to {BASELINE_PATH}")
+        print(f"README table updated in {README_PATH}")
     print_summary(graded)
 
     if args.compare and baseline is not None:

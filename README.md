@@ -85,6 +85,7 @@ The three judges use Anthropic [structured outputs](https://docs.claude.com/en/d
 
 ### Results
 
+<!-- eval-table:start -->
 | Category | Avg Faithfulness | Avg Relevance | Precision@3 | Count |
 |---|---|---|---|---|
 | happy_path | 5.00 | 3.75 | 0.62 | 16 |
@@ -94,6 +95,7 @@ The three judges use Anthropic [structured outputs](https://docs.claude.com/en/d
 | **OVERALL** | **4.95** | **3.45** | **0.45** | **40** |
 
 n = 40, 0 errored items.
+<!-- eval-table:end -->
 
 **On the instrument change.** These numbers are consistent with an earlier free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. This run is the canonical baseline going forward. A scorer wiring bug found and fixed during re-baselining accounts for the earlier discrepancy.
 
