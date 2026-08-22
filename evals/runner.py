@@ -24,6 +24,9 @@ langfuse = get_client()
 # logging
 logger = logging.getLogger(__name__)
 
+# Derived from the model so a category change is a single edit in models.py.
+CATEGORIES = [name for name in EvalSummary.model_fields if name != "overall"]
+
 
 def configure_logging() -> None:
     logging.basicConfig(
@@ -141,7 +144,6 @@ def write_results(results: list[EvalResult], output_path: str | Path) -> None:
 
 
 def print_summary(results: list[EvalResult]) -> None:
-    categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
     print("\nCategory       Avg Faithfulness    Avg Relevance    Precision@3    Count")
     print("-" * 75)
     all_faith: list[float] = []
@@ -149,7 +151,7 @@ def print_summary(results: list[EvalResult]) -> None:
     all_prec: list[float] = []
     errored = [r for r in results if r.error is not None]
 
-    for cat in categories:
+    for cat in CATEGORIES:
         cat_results = [r for r in results if r.category == cat]
         count = len(cat_results)
         if count == 0:
@@ -185,11 +187,10 @@ def print_summary(results: list[EvalResult]) -> None:
 
 
 def build_summary(results: list[EvalResult]) -> EvalSummary:
-    categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
     summary: dict[str, object] = {}
     all_faith, all_relev, all_prec = [], [], []
     errored = [r for r in results if r.error is not None]
-    for cat in categories:
+    for cat in CATEGORIES:
         cat_results = [r for r in results if r.category == cat]
         if not cat_results:
             continue
@@ -248,8 +249,7 @@ def format_delta(current: float | None, baseline: float | None) -> str:
 def print_comparison(current: EvalSummary, baseline: EvalSummary) -> None:
     print("\nCategory            Faithfulness    Relevance    Precision@3")
     print("-" * 60)
-    fields = list(EvalSummary.model_fields)
-    for name in fields:
+    for name in [*CATEGORIES, "overall"]:
         cur = getattr(current, name)
         base = getattr(baseline, name)
         if cur is None and base is None:
