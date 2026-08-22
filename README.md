@@ -88,11 +88,11 @@ The three judges use Anthropic [structured outputs](https://docs.claude.com/en/d
 <!-- eval-table:start -->
 | Category | Avg Faithfulness | Avg Relevance | Precision@3 | Count |
 |---|---|---|---|---|
-| happy_path | 5.00 | 3.75 | 0.62 | 16 |
-| edge_case | 4.90 | 2.50 | 0.20 | 10 |
+| happy_path | 4.88 | 3.62 | 0.62 | 16 |
+| edge_case | 5.00 | 2.50 | 0.30 | 10 |
 | adversarial | 5.00 | 5.00 | 0.00 | 4 |
-| bias_paired | 4.90 | 3.30 | 0.60 | 10 |
-| **OVERALL** | **4.95** | **3.45** | **0.45** | **40** |
+| bias_paired | 5.00 | 3.30 | 0.60 | 10 |
+| **OVERALL** | **4.95** | **3.40** | **0.47** | **40** |
 
 n = 40, 0 errored items.
 <!-- eval-table:end -->
