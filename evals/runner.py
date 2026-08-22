@@ -234,6 +234,39 @@ def load_baseline(path: str | Path) -> EvalSummary:
     return EvalSummary.model_validate_json(path.read_bytes())
 
 
+def format_delta(current: float | None, baseline: float | None) -> str:
+    if current is None and baseline is None:
+        return "-"
+    if current is None:
+        return "gone"
+    if baseline is None:
+        return "new"
+    diff = current - baseline
+    return f"{diff:+.2f}"
+
+
+def print_comparison(current: EvalSummary, baseline: EvalSummary) -> None:
+    print("\nCategory            Faithfulness    Relevance    Precision@3")
+    print("-" * 60)
+    fields = list(EvalSummary.model_fields)
+    for name in fields:
+        cur = getattr(current, name)
+        base = getattr(baseline, name)
+        if cur is None and base is None:
+            continue
+        cur_faith = cur.faithfulness if cur is not None else None
+        cur_relev = cur.relevance if cur is not None else None
+        cur_prec = cur.precision if cur is not None else None
+        base_faith = base.faithfulness if base is not None else None
+        base_relev = base.relevance if base is not None else None
+        base_prec = base.precision if base is not None else None
+        faith = format_delta(cur_faith, base_faith)
+        relev = format_delta(cur_relev, base_relev)
+        prec = format_delta(cur_prec, base_prec)
+        print(f"{name:<20}{faith:<16}{relev:<13}{prec}")
+
+
+
 if __name__ == "__main__":
     configure_logging()
 
