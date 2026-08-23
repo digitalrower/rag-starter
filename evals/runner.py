@@ -16,13 +16,19 @@ from evals.scorer import score_answer_relevance, score_faithfulness, score_preci
 from rag_starter import query
 from rag_starter.client import preflight_env
 from rag_starter.errors import RAGError
-from rag_starter.models import EvalItem, EvalResult
+from rag_starter.models import EvalItem, EvalResult, EvalSummary
 
 # langfuse: initialize langfuse client
 langfuse = get_client()
 
 # logging
 logger = logging.getLogger(__name__)
+
+# Derived from the model so a category change is a single edit in models.py.
+CATEGORIES = [name for name in EvalSummary.model_fields if name != "overall"]
+
+README_TABLE_START = "<!-- eval-table:start -->"
+README_TABLE_END = "<!-- eval-table:end -->"
 
 
 def configure_logging() -> None:
@@ -141,7 +147,6 @@ def write_results(results: list[EvalResult], output_path: str | Path) -> None:
 
 
 def print_summary(results: list[EvalResult]) -> None:
-    categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
     print("\nCategory       Avg Faithfulness    Avg Relevance    Precision@3    Count")
     print("-" * 75)
     all_faith: list[float] = []
@@ -149,7 +154,7 @@ def print_summary(results: list[EvalResult]) -> None:
     all_prec: list[float] = []
     errored = [r for r in results if r.error is not None]
 
-    for cat in categories:
+    for cat in CATEGORIES:
         cat_results = [r for r in results if r.category == cat]
         count = len(cat_results)
         if count == 0:
@@ -184,14 +189,11 @@ def print_summary(results: list[EvalResult]) -> None:
     print(f"\nErrored items: {len(errored)} / {len(results)}")
 
 
-def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    categories = ["happy_path", "edge_case", "adversarial", "bias_paired"]
+def build_summary(results: list[EvalResult]) -> EvalSummary:
     summary: dict[str, object] = {}
     all_faith, all_relev, all_prec = [], [], []
     errored = [r for r in results if r.error is not None]
-    for cat in categories:
+    for cat in CATEGORIES:
         cat_results = [r for r in results if r.category == cat]
         if not cat_results:
             continue
@@ -218,8 +220,98 @@ def write_summary(results: list[EvalResult], output_path: str | Path) -> None:
         "count": len(all_faith),
         "errored": len(errored),
     }
+    return EvalSummary.model_validate(summary)
+
+
+def write_summary(summary: EvalSummary, output_path: str | Path) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(summary, f, indent=2)
+        json.dump(summary.model_dump(), f, indent=2)
+
+
+def load_baseline(path: str | Path) -> EvalSummary:
+    path = Path(path)
+    if not path.exists():
+        logger.error(f"No baseline at {path}. Run with --baseline first.")
+        sys.exit(1)
+    return EvalSummary.model_validate_json(path.read_bytes())
+
+
+def format_delta(current: float | None, baseline: float | None) -> str:
+    if current is None and baseline is None:
+        return "-"
+    if current is None:
+        return "gone"
+    if baseline is None:
+        return "new"
+    diff = current - baseline
+    return f"{diff:+.2f}"
+
+
+def print_comparison(current: EvalSummary, baseline: EvalSummary) -> None:
+    print("\nCategory            Faithfulness    Relevance    Precision@3")
+    print("-" * 60)
+    for name in [*CATEGORIES, "overall"]:
+        cur = getattr(current, name)
+        base = getattr(baseline, name)
+        if cur is None and base is None:
+            continue
+        cur_faith = cur.faithfulness if cur is not None else None
+        cur_relev = cur.relevance if cur is not None else None
+        cur_prec = cur.precision if cur is not None else None
+        base_faith = base.faithfulness if base is not None else None
+        base_relev = base.relevance if base is not None else None
+        base_prec = base.precision if base is not None else None
+        faith = format_delta(cur_faith, base_faith)
+        relev = format_delta(cur_relev, base_relev)
+        prec = format_delta(cur_prec, base_prec)
+        print(f"{name:<20}{faith:<16}{relev:<13}{prec}")
+
+
+def format_metric(value: float | None) -> str:
+    return f"{value:.2f}" if value is not None else "N/A"
+
+
+def render_table(summary: EvalSummary) -> str:
+    lines = [
+        "| Category | Avg Faithfulness | Avg Relevance | Precision@3 | Count |",
+        "|---|---|---|---|---|",
+    ]
+    for name in CATEGORIES:
+        block = getattr(summary, name)
+        if block is None:
+            continue
+        lines.append(
+            f"| {name} | {format_metric(block.faithfulness)} | "
+            f"{format_metric(block.relevance)} | "
+            f"{format_metric(block.precision)} | {block.count} |"
+        )
+    o = summary.overall
+    lines.append(
+        f"| **OVERALL** | **{format_metric(o.faithfulness)}** | "
+        f"**{format_metric(o.relevance)}** | "
+        f"**{format_metric(o.precision)}** | **{o.count}** |"
+    )
+    lines.append("")
+    lines.append(f"n = {o.count}, {o.errored} errored items.")
+    return "\n".join(lines)
+
+
+def update_readme(summary: EvalSummary, path: str | Path) -> None:
+    path = Path(path)
+    text = path.read_text()
+    start = text.find(README_TABLE_START)
+    end = text.find(README_TABLE_END)
+    if start == -1 or end == -1:
+        logger.error(
+            f"Table markers not found in {path}. "
+            f"Expected {README_TABLE_START} and {README_TABLE_END}."
+        )
+        sys.exit(1)
+    before = text[: start + len(README_TABLE_START)]
+    after = text[end:]
+    path.write_text(f"{before}\n{render_table(summary)}\n{after}")
 
 
 if __name__ == "__main__":
@@ -250,9 +342,29 @@ if __name__ == "__main__":
         help="Run only items with these specific IDs (e.g. --ids 027 031)",
     )
 
+    parser.add_argument(
+        "--baseline",
+        action="store_true",
+        help="Write this run's summary to evals/baseline.json as the tracked baseline",
+    )
+
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare this run's summary against evals/baseline.json",
+    )
+
     args = parser.parse_args()
 
+    if (args.baseline or args.compare) and (args.limit is not None or args.ids is not None):
+        parser.error("--baseline and --compare cannot be combined with --limit or --ids")
+
     DATASET_PATH = Path(__file__).parent / "dataset.json"
+    RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
+    SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
+    BASELINE_PATH = Path(__file__).parent / "baseline.json"
+    README_PATH = Path(__file__).parent.parent / "README.md"
+
     dataset = load_dataset(DATASET_PATH)
 
     # Filtering Logic
@@ -260,18 +372,27 @@ if __name__ == "__main__":
         wanted_ids = set(args.ids)  # convert to set for O(1) lookups
         dataset = [item for item in dataset if item.id in wanted_ids]
         if not dataset:
-            logging.error(f"No matching items found for IDs: {args.ids}")
+            logger.error(f"No matching items found for IDs: {args.ids}")
             sys.exit(1)
     elif args.limit is not None:
         dataset = dataset[: args.limit]
 
+    baseline = load_baseline(BASELINE_PATH) if args.compare else None
+
     collection = query.get_collection()
     graded = run_eval(dataset, collection)
-    RESULTS_PATH = Path(__file__).parent / "results" / "results.json"
-    SUMMARY_PATH = Path(__file__).parent / "results" / "summary.json"
     write_results(graded, RESULTS_PATH)
-    write_summary(graded, SUMMARY_PATH)
+    summary = build_summary(graded)
+    write_summary(summary, SUMMARY_PATH)
+    if args.baseline:
+        write_summary(summary, BASELINE_PATH)
+        update_readme(summary, README_PATH)
+        print(f"\nBaseline written to {BASELINE_PATH}")
+        print(f"README table updated in {README_PATH}")
     print_summary(graded)
+
+    if args.compare and baseline is not None:
+        print_comparison(summary, baseline)
 
     # langfuse: flush events before the script exits
     langfuse.flush()

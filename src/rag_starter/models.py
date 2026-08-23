@@ -63,3 +63,24 @@ class EvalResult(BaseModel):
     precision_reasoning: str | None = None
     sources: list[str] | None = None
     error: str | None = None
+
+
+class CategorySummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    faithfulness: float | None = None
+    relevance: float | None = None
+    precision: float | None = None
+    count: int
+
+
+class OverallSummary(CategorySummary):
+    errored: int
+
+
+class EvalSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    happy_path: CategorySummary | None = None
+    edge_case: CategorySummary | None = None
+    adversarial: CategorySummary | None = None
+    bias_paired: CategorySummary | None = None
+    overall: OverallSummary
