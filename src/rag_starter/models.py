@@ -84,4 +84,3 @@ class EvalSummary(BaseModel):
     adversarial: CategorySummary | None = None
     bias_paired: CategorySummary | None = None
     overall: OverallSummary
-

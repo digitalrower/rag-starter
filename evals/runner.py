@@ -304,14 +304,14 @@ def update_readme(summary: EvalSummary, path: str | Path) -> None:
     start = text.find(README_TABLE_START)
     end = text.find(README_TABLE_END)
     if start == -1 or end == -1:
-        logger.error(f"Table markers not found in {path}. "
-                     f"Expected {README_TABLE_START} and {README_TABLE_END}."
+        logger.error(
+            f"Table markers not found in {path}. "
+            f"Expected {README_TABLE_START} and {README_TABLE_END}."
         )
         sys.exit(1)
     before = text[: start + len(README_TABLE_START)]
     after = text[end:]
     path.write_text(f"{before}\n{render_table(summary)}\n{after}")
-
 
 
 if __name__ == "__main__":
