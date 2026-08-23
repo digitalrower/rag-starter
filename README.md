@@ -61,7 +61,7 @@ For production, measure against your actual usage patterns before committing to 
 - Embedding quality depends on the corpus. Retrieval is only as good as the embeddings. For domain-specific jargon (medical, legal, technical), consider fine-tuned or domain-specific embedding models in production.
 - Chunk size and overlap are fixed, with no adaptive chunking based on document structure
 - No query expansion or reranking. Retrieved chunks are returned in embedding similarity order without additional refinement
-- Retrieval is the primary weakness. Precision@3 scores 0.20 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the primary area targeted for improvement. See the eval results below for the full baseline.
+- Retrieval is the primary weakness. Precision@3 scores 0.30 on edge cases and 0.00 on adversarial queries. Generation stays grounded when the right chunks are found, but the pipeline does not reliably retrieve them for ambiguous or adversarial inputs. Retrieval quality is the primary area targeted for improvement. See the eval results below for the full baseline.
 - Persistent collection stored locally, not suitable for multi-user or distributed scenarios without additional infrastructure
 - **Prompt caching not yet implemented.** Anthropic prompt caching will be
   applied in a later hardening pass once a token-cost baseline is established.
@@ -73,7 +73,7 @@ For production, measure against your actual usage patterns before committing to 
 
 Automated eval harness using LLM-as-judge scoring (Claude Haiku, temperature=0). 40 test cases across four categories. Full dataset: `evals/dataset.json`.
 
-**These numbers are corpus-dependent.** The baseline was measured against the demonstration corpus in `data/`, and the 40 golden Q/A pairs in `evals/dataset.json` are keyed to it: the questions assume its content and the precision@3 judgments assume its chunk boundaries. Because that corpus ships with the repository, the baseline reproduces on a fresh clone. Swap in a different corpus and the harness still runs, but the scores measure how well your documents answer questions written for someone else's. To evaluate your own pipeline, replace `evals/dataset.json` with pairs written against your corpus and re-baseline. The methodology, the three metrics, the judge prompts, and the per-item error isolation all carry over unchanged.
+**These numbers are corpus-dependent.** The baseline was measured against the demonstration corpus in `data/`, and the 40 golden Q/A pairs in `evals/dataset.json` are keyed to it: the questions assume its content and the precision@3 judgments assume its chunk boundaries. Because that corpus ships with the repository, the baseline reproduces on a fresh clone. Swap in a different corpus and the harness still runs, but the scores measure how well your documents answer questions written for someone else's. To evaluate your own pipeline, replace `evals/dataset.json` with pairs written against your corpus and re-baseline with `--baseline`. The methodology, the three metrics, the judge prompts, and the per-item error isolation all carry over unchanged.
 
 The three judges use Anthropic [structured outputs](https://docs.claude.com/en/docs/build-with-claude/structured-outputs) (constrained decoding via `messages.parse`), so the judge is guaranteed to return schema-valid JSON rather than free-text that has to be parsed. This replaced an earlier free-text-and-parse approach that intermittently failed when the judge prefaced its JSON with prose. See the note under Results.
 
@@ -82,6 +82,20 @@ The three judges use Anthropic [structured outputs](https://docs.claude.com/en/d
 - **Faithfulness (1–5):** Does the answer accurately reflect the retrieved chunks? Penalizes hallucination.
 - **Relevance (1–5):** Does the answer address the question? Penalizes responses where chunks were retrieved but didn't produce a useful answer.
 - **Precision@3 (0 or 1):** Do the top-3 retrieved chunks contain sufficient information to answer the question?
+
+### Running the harness
+
+Run from the repository root. The harness resolves `./chroma_db` and `./data` relative to the working directory, so running it from elsewhere reads the wrong store or none at all.
+
+    python -m evals.runner                 # full run, prints the table
+    python -m evals.runner --compare       # full run, plus per-category deltas against the tracked baseline
+    python -m evals.runner --baseline      # full run, writes evals/baseline.json and regenerates the table below
+    python -m evals.runner --limit 5       # first 5 items only
+    python -m evals.runner --ids 027 031   # specific items by id
+
+`--baseline` and `--compare` both refuse to run alongside `--limit` or `--ids`. A filtered run produces category averages over a handful of items, which is not comparable to the full-run baseline and would be silently wrong rather than obviously wrong if written or compared.
+
+`--baseline` is a deliberate act, not a routine one: it overwrites the tracked baseline and rewrites the results table in this file. Re-baseline when the corpus or the dataset changes, not when a run comes back a tenth lower.
 
 ### Results
 
@@ -97,11 +111,13 @@ The three judges use Anthropic [structured outputs](https://docs.claude.com/en/d
 n = 40, 0 errored items.
 <!-- eval-table:end -->
 
-**On the instrument change.** These numbers are consistent with an earlier free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. This run is the canonical baseline going forward. A scorer wiring bug found and fixed during re-baselining accounts for the earlier discrepancy.
+*The table above is generated. `python -m evals.runner --baseline` rewrites the region between the markers from the same summary object it writes to `evals/baseline.json`, so the published numbers and the tracked baseline cannot drift apart. Edits made by hand between the markers are lost on the next re-baseline.*
+
+**On the instrument change.** These numbers are consistent with an earlier free-text-judge read (4.95 / 3.55 / 0.53): faithfulness is identical and the small relevance and precision differences are ordinary run-to-run variation. The value of the structured-outputs migration is reliability, not a score change: the previous free-text judge intermittently returned prose instead of JSON (13 of 40 items failed to parse on one run), and constrained decoding eliminated that failure class entirely. Structured outputs are the instrument from that point onward; the table above is the current baseline under it. A scorer wiring bug found and fixed during re-baselining accounts for the earlier discrepancy.
 
 ### Interpretation
 
-The earlier read showed the same pattern: the weakness is retrieval, not generation. Precision@3 drops to 0.20 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
+The earlier read showed the same pattern: the weakness is retrieval, not generation. Precision@3 drops to 0.30 on edge cases and 0.00 on adversarial queries, and the lower relevance and faithfulness in those categories follow directly from it. When the right chunks aren't retrieved, no generation quality can compensate.
 
 The adversarial category (precision@3=0.00, relevance=5.00) shows the grounding constraint working as intended: the four adversarial cases scored perfectly on relevance because the system correctly returned "I don't know based on the provided documentation" rather than inventing an answer when no chunks were retrieved.
 
@@ -153,7 +169,7 @@ The eval dataset is also mirrored into a Langfuse Dataset (`rag-starter-eval`), 
 
     python -m evals.experiment --name run-1
 
-This path is additive and does not replace the canonical local harness. `runner.py` remains the source of truth for the baseline (it regenerates `results.json` and `summary.json` on every run, which are gitignored; the authoritative scores are recorded in PR bodies and in the eval table above). The managed experiment path is for run-over-run comparison in the UI and to seed the methodology that scales to later projects. The seed step is a one-time `python -m scripts.seed_langfuse_dataset`.
+This path is additive and does not replace the canonical local harness. `runner.py` remains the source of truth for the baseline. Every run regenerates `results.json` and `summary.json`, which are gitignored and hold only the most recent run. The published baseline lives in the tracked `evals/baseline.json`, written by `--baseline` and read by `--compare`, and the eval table above is generated from that same summary. The managed experiment path is for run-over-run comparison in the UI and to seed the methodology that scales to later projects. The seed step is a one-time `python -m scripts.seed_langfuse_dataset`.
 
 ![Langfuse Experiments compare view: two runs of the same pipeline side by side, scores per item with run-over-run deltas highlighted](./assets/langfuse-experiments-compare.png)
 
@@ -412,6 +428,7 @@ Runtime dependencies are declared in `pyproject.toml` and mirrored, at identical
     │       └── query.py          # Async retrieve/generate + main_sync wrapper + main_batch dispatcher (Langfuse traced)
     ├── evals/
     │   ├── dataset.json          # 40 golden Q/A pairs (happy_path, edge_case, adversarial, bias_paired)
+    │   ├── baseline.json         # Tracked published baseline (written by --baseline, read by --compare)
     │   ├── scorer.py             # LLM-as-judge scoring logic
     │   ├── runner.py             # Canonical eval run; per-item tracing + score emission, writes results/
     │   ├── experiment.py         # Additive Langfuse Datasets/Experiments runner (run-over-run compare)
